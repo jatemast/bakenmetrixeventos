@@ -47,4 +47,16 @@ class CampaignController extends Controller
             'campaigns' => $campaigns
         ]);
     }
+
+    /**
+     * Display the specified campaign.
+     */
+    public function show(string $id): JsonResponse
+    {
+        $campaign = Campaign::with('events')->findOrFail($id);
+
+        return response()->json([
+            'campaign' => $campaign
+        ]);
+    }
 }
