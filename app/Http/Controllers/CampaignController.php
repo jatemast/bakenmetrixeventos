@@ -36,4 +36,15 @@ class CampaignController extends Controller
             'campaign' => $campaign
         ], 201);
     }
+
+    /**
+     * Display a listing of the campaigns.
+     */
+    public function index(): JsonResponse
+    {
+        $campaigns = Campaign::all(); // Carga todas las campañas sin los eventos
+        return response()->json([
+            'campaigns' => $campaigns
+        ]);
+    }
 }

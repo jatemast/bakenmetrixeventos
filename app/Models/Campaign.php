@@ -20,7 +20,11 @@ class Campaign extends Model
         'whatsapp',
         'start_date',
         'end_date',
-        'number_of_events',
         'campaign_number',
     ];
+
+    public function events()
+    {
+        return $this->hasMany(Event::class);
+    }
 }
