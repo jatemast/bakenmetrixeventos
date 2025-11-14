@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\CampaignController;
+use App\Http\Controllers\EventController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -17,4 +18,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/campaigns', [CampaignController::class, 'store']);
     Route::get('/campaigns', [CampaignController::class, 'index']);
     Route::get('/campaigns/{id}', [CampaignController::class, 'show']);
+
+    // Rutas para eventos
+    Route::post('/events', [EventController::class, 'store']);
+    Route::get('/campaigns/{campaignId}/events', [EventController::class, 'index']);
 });
