@@ -45,4 +45,16 @@ class EventController extends Controller
             'events' => $events
         ]);
     }
+
+    /**
+     * Display the specified event publicly by QR code data.
+     */
+    public function showPublic(string $qrCodeData): JsonResponse
+    {
+        $event = Event::where('qr_code_data', $qrCodeData)->with('campaign')->firstOrFail();
+
+        return response()->json([
+            'event' => $event
+        ]);
+    }
 }
