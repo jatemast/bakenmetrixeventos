@@ -3,6 +3,8 @@
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\CampaignController;
 use App\Http\Controllers\EventController;
+use App\Http\Controllers\PersonaController;
+use App\Http\Controllers\MascotaController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -25,4 +27,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // Rutas para eventos
     Route::post('/events', [EventController::class, 'store']);
     Route::get('/campaigns/{campaignId}/events', [EventController::class, 'index']);
+
+    // Rutas para Mascotas anidadas bajo Personas
+    Route::apiResource('personas.mascotas', MascotaController::class);
 });
+
+// Rutas para Personas (públicas)
+Route::apiResource('personas', PersonaController::class);
