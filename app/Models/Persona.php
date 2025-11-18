@@ -19,6 +19,8 @@ class Persona extends Model
         'codigo_postal',
         'municipio',
         'estado',
+        'numero_celular',
+        'numero_telefono',
     ];
 
     public function mascotas()

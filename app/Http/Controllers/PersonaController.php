@@ -10,9 +10,58 @@ class PersonaController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $personas = Persona::all();
+        $query = Persona::query();
+
+        // Búsqueda global (nombre, apellido paterno, apellido materno, número de celular, número de teléfono, ID)
+        if ($request->has('search')) {
+            $searchTerm = strtolower($request->search);
+            $query->where(function ($q) use ($searchTerm) {
+                $q->whereRaw('LOWER(nombre) LIKE ?', ['%' . $searchTerm . '%'])
+                  ->orWhereRaw('LOWER(apellido_paterno) LIKE ?', ['%' . $searchTerm . '%'])
+                  ->orWhereRaw('LOWER(apellido_materno) LIKE ?', ['%' . $searchTerm . '%'])
+                  ->orWhereRaw('LOWER(numero_celular) LIKE ?', ['%' . $searchTerm . '%'])
+                  ->orWhereRaw('LOWER(numero_telefono) LIKE ?', ['%' . $searchTerm . '%']);
+                // Si el término de búsqueda es numérico, también buscamos por ID
+                if (is_numeric($searchTerm)) {
+                    $q->orWhere('id', $searchTerm);
+                }
+            });
+        }
+
+        // Filtros específicos (pueden combinarse con la búsqueda global o usarse solos)
+        if ($request->has('nombre') && !$request->has('search')) {
+            $nombre = strtolower($request->nombre);
+            $query->whereRaw('LOWER(nombre) LIKE ?', ['%' . $nombre . '%']);
+        }
+
+        if ($request->has('apellido_paterno') && !$request->has('search')) {
+            $apellidoPaterno = strtolower($request->apellido_paterno);
+            $query->whereRaw('LOWER(apellido_paterno) LIKE ?', ['%' . $apellidoPaterno . '%']);
+        }
+
+        if ($request->has('apellido_materno') && !$request->has('search')) {
+            $apellidoMaterno = strtolower($request->apellido_materno);
+            $query->whereRaw('LOWER(apellido_materno) LIKE ?', ['%' . $apellidoMaterno . '%']);
+        }
+
+        if ($request->has('numero_celular') && !$request->has('search')) {
+            $numeroCelular = strtolower($request->numero_celular);
+            $query->whereRaw('LOWER(numero_celular) LIKE ?', ['%' . $numeroCelular . '%']);
+        }
+
+        if ($request->has('numero_telefono') && !$request->has('search')) {
+            $numeroTelefono = strtolower($request->numero_telefono);
+            $query->whereRaw('LOWER(numero_telefono) LIKE ?', ['%' . $numeroTelefono . '%']);
+        }
+
+        $personas = $query->get();
+
+        if ($personas->isEmpty()) {
+            return response()->json(['message' => 'Registros no encontrados'], 404);
+        }
+
         return response()->json($personas);
     }
 
@@ -37,6 +86,8 @@ class PersonaController extends Controller
                 'codigo_postal' => 'required|string|max:10',
                 'municipio' => 'required|string|max:255',
                 'estado' => 'required|string|max:255',
+                'numero_celular' => 'nullable|string|max:20',
+                'numero_telefono' => 'nullable|string|max:20',
             ]);
 
             \Log::info('Datos validados para Persona:', $validatedData);
@@ -79,6 +130,8 @@ class PersonaController extends Controller
             'codigo_postal' => 'sometimes|required|string|max:10',
             'municipio' => 'sometimes|required|string|max:255',
             'estado' => 'sometimes|required|string|max:255',
+            'numero_celular' => 'nullable|string|max:20',
+            'numero_telefono' => 'nullable|string|max:20',
         ]);
 
         $persona->update($validatedData);

@@ -25,6 +25,8 @@ return new class extends Migration
             $table->string('codigo_postal');
             $table->string('municipio');
             $table->string('estado');
+            $table->string('numero_celular', 20)->nullable();
+            $table->string('numero_telefono', 20)->nullable();
             $table->timestamps();
         });
     }
