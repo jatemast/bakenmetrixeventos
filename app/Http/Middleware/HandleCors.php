@@ -16,7 +16,7 @@ class HandleCors
     public function handle(Request $request, Closure $next): Response
     {
         return $next($request)
-            ->header('Access-Control-Allow-Origin', 'http://localhost:5174, https://eventos2.soymetrix.com/')
+            ->header('Access-Control-Allow-Origin', 'http://localhost:5174, http://localhost:5173, https://eventos2.soymetrix.com/')
             ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
             ->header('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization, X-Requested-With, Application');
     }
