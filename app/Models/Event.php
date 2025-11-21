@@ -22,11 +22,24 @@ class Event extends Model
         'municipality',
         'state',
         'country',
-        'qr_code_data',
+        'checkin_code',
+        'checkout_code',
+        'bonus_points_for_attendee',
+        'bonus_points_for_leader',
     ];
 
     public function campaign()
     {
         return $this->belongsTo(Campaign::class);
+    }
+
+    public function attendees()
+    {
+        return $this->hasMany(EventAttendee::class);
+    }
+
+    public function bonusPointsHistory()
+    {
+        return $this->hasMany(BonusPointHistory::class);
     }
 }

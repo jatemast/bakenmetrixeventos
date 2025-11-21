@@ -13,6 +13,7 @@ return new class extends Migration
     {
         Schema::create('personas', function (Blueprint $table) {
             $table->id();
+            $table->string('cedula')->unique(); // Nuevo campo para la cédula/DNI
             $table->string('nombre');
             $table->string('apellido_paterno');
             $table->string('apellido_materno');
@@ -27,6 +28,9 @@ return new class extends Migration
             $table->string('estado');
             $table->string('numero_celular', 20)->nullable();
             $table->string('numero_telefono', 20)->nullable();
+            $table->boolean('is_leader')->default(false); // Nuevo campo para identificar líderes
+            $table->string('referral_code')->unique()->nullable(); // Código de referido para líderes
+            $table->integer('bonus_points')->default(0); // Puntos de bonificación
             $table->timestamps();
         });
     }

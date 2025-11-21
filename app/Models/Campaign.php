@@ -21,10 +21,11 @@ class Campaign extends Model
         'start_date',
         'end_date',
         'campaign_number',
+        'number_of_events',
     ];
 
     public function events()
     {
-        return $this->hasMany(Event::class);
+        return $this->belongsToMany(Event::class, 'campaign_event');
     }
 }

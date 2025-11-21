@@ -37,6 +37,10 @@ class EventRequest extends FormRequest
             'municipality' => 'nullable|string|max:255',
             'state' => 'nullable|string|max:255',
             'country' => 'nullable|string|max:255',
+            'checkin_code' => 'required|string|max:255|unique:events,checkin_code',
+            'checkout_code' => 'required|string|max:255|unique:events,checkout_code',
+            'bonus_points_for_attendee' => 'required|integer|min:0',
+            'bonus_points_for_leader' => 'required|integer|min:0',
         ];
     }
 }

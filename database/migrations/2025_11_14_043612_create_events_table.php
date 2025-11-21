@@ -28,7 +28,10 @@ return new class extends Migration
             $table->string('municipality')->nullable();
             $table->string('state')->nullable();
             $table->string('country')->nullable();
-            $table->string('qr_code_data')->nullable(); // Para almacenar los datos del QR
+            $table->string('checkin_code')->unique(); // Código para el QR de entrada
+            $table->string('checkout_code')->unique(); // Código para el QR de salida
+            $table->integer('bonus_points_for_attendee')->default(0); // Puntos para el asistente
+            $table->integer('bonus_points_for_leader')->default(0); // Puntos para el líder referido
             $table->timestamps();
         });
     }
