@@ -23,7 +23,7 @@ class EventCheckoutRequest extends FormRequest
     {
         return [
             'checkout_code' => 'required|string|exists:events,checkout_code',
-            'cedula' => 'required|string|exists:personas,cedula',
+            'whatsapp' => 'required|string',
         ];
     }
 }

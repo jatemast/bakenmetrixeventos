@@ -29,7 +29,7 @@ class EventRequest extends FormRequest
             'email' => 'nullable|email|max:255',
             'whatsapp' => 'nullable|string|max:20',
             'dynamic' => 'nullable|string',
-            'ai_agent_info_file' => 'nullable|file|mimes:pdf|max:2048',
+            'ai_agent_info_file' => 'nullable|file|mimes:pdf|max:20480',
             'street' => 'nullable|string|max:255',
             'number' => 'nullable|string|max:255',
             'neighborhood' => 'nullable|string|max:255',
@@ -37,8 +37,6 @@ class EventRequest extends FormRequest
             'municipality' => 'nullable|string|max:255',
             'state' => 'nullable|string|max:255',
             'country' => 'nullable|string|max:255',
-            'checkin_code' => 'required|string|max:255|unique:events,checkin_code',
-            'checkout_code' => 'required|string|max:255|unique:events,checkout_code',
             'bonus_points_for_attendee' => 'required|integer|min:0',
             'bonus_points_for_leader' => 'required|integer|min:0',
         ];

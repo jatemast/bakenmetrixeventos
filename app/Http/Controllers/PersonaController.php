@@ -58,10 +58,6 @@ class PersonaController extends Controller
 
         $personas = $query->get();
 
-        if ($personas->isEmpty()) {
-            return response()->json(['message' => 'Registros no encontrados'], 404);
-        }
-
         return response()->json($personas);
     }
 
@@ -74,6 +70,7 @@ class PersonaController extends Controller
 
         try {
             $validatedData = $request->validate([
+                'cedula' => 'required|string|max:255|unique:personas,cedula',
                 'nombre' => 'required|string|max:255',
                 'apellido_paterno' => 'required|string|max:255',
                 'apellido_materno' => 'required|string|max:255',
@@ -145,5 +142,21 @@ class PersonaController extends Controller
     {
         $persona->delete();
         return response()->json(null, 204);
+    }
+
+    /**
+     * Get bonus points for a specific persona.
+     */
+    public function bonusPoints(Persona $persona)
+    {
+        $balance = $persona->loyalty_balance;
+        $history = $persona->bonusPointsHistory()->orderBy('created_at', 'desc')->get();
+
+        return response()->json([
+            'persona' => $persona,
+            'persona_id' => $persona->id,
+            'current_balance' => $balance,
+            'history' => $history
+        ]);
     }
 }

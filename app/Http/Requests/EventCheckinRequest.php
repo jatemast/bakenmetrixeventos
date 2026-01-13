@@ -23,7 +23,7 @@ class EventCheckinRequest extends FormRequest
     {
         return [
             'checkin_code' => 'required|string|exists:events,checkin_code',
-            'cedula' => 'required|string|exists:personas,cedula',
+            'whatsapp' => 'required|string',
             'referral_code' => 'nullable|string|exists:personas,referral_code',
         ];
     }
