@@ -17,6 +17,13 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             TestUserSeeder::class,
+            CampaignSeeder::class,
+            EventSeeder::class,
+            PersonaSeeder::class,
+            MascotaSeeder::class,
+            EventAttendeeSeeder::class,
+            BonusPointHistorySeeder::class,
+            QrCodeSeeder::class,
         ]);
     }
 }
