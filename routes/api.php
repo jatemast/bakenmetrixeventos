@@ -14,11 +14,18 @@ use App\Http\Controllers\QrScanController;
 use App\Http\Controllers\BonusController;
 use App\Http\Controllers\GroupController;
 use App\Http\Controllers\RedemptionController;
+use App\Http\Controllers\PublicRegistrationController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login'])->name('login');
+
+// Public Registration Routes
+Route::post('/public/check-whatsapp', [PublicRegistrationController::class, 'checkWhatsApp']);
+Route::post('/public/register', [PublicRegistrationController::class, 'register']);
+Route::post('/public/register-event', [PublicRegistrationController::class, 'registerForEvent']);
+Route::post('/public/profile', [PublicRegistrationController::class, 'getPersonaProfile']);
 
 // Ruta pública para ver un evento por su código de check-in
 Route::get('/events/public/{checkinCode}', [EventController::class, 'showPublic']);
