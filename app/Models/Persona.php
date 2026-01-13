@@ -20,15 +20,22 @@ class Persona extends Model
         'codigo_postal',
         'municipio',
         'estado',
+        'region',
         'numero_celular',
         'numero_telefono',
         'is_leader',
         'referral_code',
-        'bonus_points',
+        'loyalty_balance',
+        'universe_type',
+        'leader_id',
+        'last_interacted_event_id',
+        'last_interaction_at',
+        'last_invited_event_id',
     ];
 
     protected $casts = [
         'is_leader' => 'boolean',
+        'last_interaction_at' => 'datetime',
     ];
 
     public function mascotas()
@@ -49,5 +56,35 @@ class Persona extends Model
     public function bonusPointsHistory()
     {
         return $this->hasMany(BonusPointHistory::class, 'persona_id');
+    }
+
+    public function leader()
+    {
+        return $this->belongsTo(Persona::class, 'leader_id');
+    }
+
+    public function guests()
+    {
+        return $this->hasMany(Persona::class, 'leader_id');
+    }
+
+    public function referrals()
+    {
+        return $this->hasMany(EventAttendee::class, 'referred_by');
+    }
+
+    public function qrCodes()
+    {
+        return $this->hasMany(QrCode::class);
+    }
+
+    public function lastInteractedEvent()
+    {
+        return $this->belongsTo(Event::class, 'last_interacted_event_id');
+    }
+
+    public function lastInvitedEvent()
+    {
+        return $this->belongsTo(Event::class, 'last_invited_event_id');
     }
 }

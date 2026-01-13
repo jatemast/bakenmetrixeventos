@@ -9,7 +9,9 @@ class Campaign extends Model
     protected $fillable = [
         'name',
         'theme',
+        'objective',
         'target_citizen',
+        'target_universes',
         'special_observations',
         'citizen_segmentation_file',
         'leader_segmentation_file',
@@ -22,10 +24,23 @@ class Campaign extends Model
         'end_date',
         'campaign_number',
         'number_of_events',
+        'status',
+        'created_by',
+    ];
+
+    protected $casts = [
+        'target_universes' => 'array',
+        'start_date' => 'date',
+        'end_date' => 'date',
     ];
 
     public function events()
     {
         return $this->belongsToMany(Event::class, 'campaign_event');
+    }
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
     }
 }
