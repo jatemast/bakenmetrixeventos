@@ -25,7 +25,6 @@ return [
 
     'n8n' => [
         'notification_webhook_url' => env('N8N_NOTIFICATION_WEBHOOK_URL'),
-        'webhook_url' => env('N8N_EVENT_CREATED_WEBHOOK_URL', env('N8N_NOTIFICATION_WEBHOOK_URL')),
     ],
 
 ];
