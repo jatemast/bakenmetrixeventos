@@ -25,11 +25,17 @@ class EventRequest extends FormRequest
             'campaign_id' => 'required|exists:campaigns,id',
             'detail' => 'required|string|max:255',
             'date' => 'required|date',
+            'time' => 'nullable|date_format:H:i',
+            'duration_hours' => 'nullable|numeric|min:0.5|max:24',
+            'max_capacity' => 'nullable|integer|min:1',
+            'target_universes' => 'nullable|array',
+            'status' => 'nullable|in:scheduled,active,completed,cancelled',
             'responsible' => 'required|string|max:255',
             'email' => 'nullable|email|max:255',
             'whatsapp' => 'nullable|string|max:20',
             'dynamic' => 'nullable|string',
-            'ai_agent_info_file' => 'nullable|file|mimes:pdf|max:20480',
+            'pdf_path' => 'sometimes|file|mimes:pdf,docx,doc,txt|max:20480',
+            'ai_agent_info_file' => 'sometimes|file|mimes:pdf,docx,doc,txt|max:20480',
             'street' => 'nullable|string|max:255',
             'number' => 'nullable|string|max:255',
             'neighborhood' => 'nullable|string|max:255',
@@ -40,5 +46,21 @@ class EventRequest extends FormRequest
             'bonus_points_for_attendee' => 'required|integer|min:0',
             'bonus_points_for_leader' => 'required|integer|min:0',
         ];
+    }
+
+    /**
+     * Prepare the data for validation.
+     * Decode JSON strings before validation
+     */
+    protected function prepareForValidation()
+    {
+        if ($this->has('target_universes') && is_string($this->target_universes)) {
+            $decoded = json_decode($this->target_universes, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $this->merge([
+                    'target_universes' => $decoded
+                ]);
+            }
+        }
     }
 }

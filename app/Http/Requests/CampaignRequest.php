@@ -25,6 +25,7 @@ class CampaignRequest extends FormRequest
             'name' => 'nullable|string|max:255',
             'theme' => 'nullable|string|max:255',
             'target_citizen' => 'nullable|string|max:255',
+            'target_universes' => 'nullable|array',
             'special_observations' => 'nullable|string',
             'citizen_segmentation_file' => 'nullable|file|mimes:csv,pdf,xlsx,xls|max:2048',
             'leader_segmentation_file' => 'nullable|file|mimes:csv,pdf,xlsx,xls|max:2048',
@@ -38,5 +39,21 @@ class CampaignRequest extends FormRequest
             'number_of_events' => 'nullable|integer|min:0',
             'campaign_number' => 'nullable|integer|unique:campaigns,campaign_number',
         ];
+    }
+
+    /**
+     * Prepare the data for validation.
+     * Decode JSON strings before validation
+     */
+    protected function prepareForValidation()
+    {
+        if ($this->has('target_universes') && is_string($this->target_universes)) {
+            $decoded = json_decode($this->target_universes, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $this->merge([
+                    'target_universes' => $decoded
+                ]);
+            }
+        }
     }
 }
