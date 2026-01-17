@@ -26,6 +26,9 @@ class AuthController extends Controller
             'message' => 'Registro exitoso',
             'access_token' => $token,
             'token_type' => 'Bearer',
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
         ], 201);
     }
 
@@ -44,6 +47,9 @@ class AuthController extends Controller
             'message' => 'Inicio de sesión exitoso',
             'access_token' => $token,
             'token_type' => 'Bearer',
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
         ]);
     }
 

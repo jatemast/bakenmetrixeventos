@@ -62,7 +62,7 @@ class MilitantQrService
                 'type' => 'QR-MILITANT',
                 'code' => $code,
                 'persona_id' => $militant->id,
-                'is_active' => true,
+                'scan_count' => 0,
             ]);
 
             $stats['qrs_created']++;
@@ -123,7 +123,7 @@ class MilitantQrService
                 'type' => 'QR-MILITANT',
                 'code' => $code,
                 'persona_id' => $militant->id,
-                'is_active' => true,
+                'scan_count' => 0,
             ]);
 
             $stats['qrs_created']++;
@@ -160,17 +160,13 @@ class MilitantQrService
     }
 
     /**
-     * Distribute militant QR codes via n8n workflow (WhatsApp integration)
-     * 
-     * This triggers the n8n workflow which will:
-     * 1. Generate QR code images
-     * 2. Send personalized WhatsApp messages with QR codes
-     * 3. Track delivery status
+     * Get militant QR data for n8n distribution workflow
+     * Returns array ready for WhatsApp distribution
      * 
      * @param Campaign $campaign
      * @return array
      */
-    public function distributeMilitantQrs(Campaign $campaign): array
+    public function getMilitantQrsForDistribution(Campaign $campaign): array
     {
         $qrCodes = QrCode::where('campaign_id', $campaign->id)
             ->where('type', 'QR-MILITANT')
@@ -178,73 +174,34 @@ class MilitantQrService
             ->with('persona')
             ->get();
 
-        $stats = [
-            'total_qrs' => $qrCodes->count(),
-            'prepared_for_distribution' => 0,
-            'skipped' => 0,
-            'errors' => [],
-        ];
-
-        $qrDataForN8n = [];
+        $personas = [];
 
         foreach ($qrCodes as $qrCode) {
-            if (!$qrCode->persona) {
-                $stats['skipped']++;
-                $stats['errors'][] = "QR {$qrCode->id} has no associated persona";
+            if (!$qrCode->persona || !$qrCode->persona->numero_celular) {
                 continue;
             }
 
-            if (!$qrCode->persona->numero_celular) {
-                $stats['skipped']++;
-                $stats['errors'][] = "Persona {$qrCode->persona_id} has no phone number";
-                continue;
-            }
+            // Check if militant has image stored, otherwise null
+            $imagePath = $qrCode->persona->qr_image_path ?? null;
+            $imageUrl = $imagePath ? url("storage/{$imagePath}") : null;
 
-            try {
-                // Generate QR code image
-                $qrImagePath = $this->generateQrCodeImage($qrCode);
-                
-                // Prepare data for n8n workflow
-                $qrDataForN8n[] = [
-                    'qr_code_id' => $qrCode->id,
-                    'qr_code' => $qrCode->code,
-                    'persona_id' => $qrCode->persona_id,
-                    'persona_name' => $qrCode->persona->nombre,
-                    'phone_number' => $qrCode->persona->numero_celular,
-                    'qr_image_path' => $qrImagePath,
-                    'qr_image_url' => asset('storage/' . $qrImagePath),
-                ];
-                
-                $stats['prepared_for_distribution']++;
-                
-            } catch (\Exception $e) {
-                $stats['skipped']++;
-                $stats['errors'][] = "Failed to prepare QR for persona {$qrCode->persona_id}: {$e->getMessage()}";
-                Log::error("Failed to prepare militant QR", [
-                    'qr_id' => $qrCode->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+            $personas[] = [
+                'qr_code_id' => $qrCode->id,
+                'qr_code' => $qrCode->code,
+                'persona_id' => $qrCode->persona_id,
+                'persona_name' => $qrCode->persona->nombre,
+                'phone_number' => $qrCode->persona->numero_celular,
+                'qr_image_url' => $imageUrl,
+                'universe' => $qrCode->persona->universe_type,
+            ];
         }
 
-        // Trigger n8n workflow for WhatsApp distribution
-        if (!empty($qrDataForN8n)) {
-            try {
-                $this->triggerN8nMilitantQrWorkflow($campaign, $qrDataForN8n);
-                Log::info("Triggered n8n workflow for {$stats['prepared_for_distribution']} militant QRs", [
-                    'campaign_id' => $campaign->id,
-                    'total_qrs' => $stats['total_qrs'],
-                ]);
-            } catch (\Exception $e) {
-                Log::error("Failed to trigger n8n workflow for militant QRs", [
-                    'campaign_id' => $campaign->id,
-                    'error' => $e->getMessage(),
-                ]);
-                $stats['errors'][] = "Failed to trigger n8n workflow: {$e->getMessage()}";
-            }
-        }
-
-        return $stats;
+        return [
+            'campaign_id' => $campaign->id,
+            'campaign_name' => $campaign->nombre,
+            'total_militants' => count($personas),
+            'personas' => $personas,
+        ];
     }
 
     /**
@@ -340,7 +297,6 @@ class MilitantQrService
         // Find the QR code
         $qr = QrCode::where('code', $qrCode)
             ->where('type', 'QR-MILITANT')
-            ->where('is_active', true)
             ->with('persona')
             ->first();
 

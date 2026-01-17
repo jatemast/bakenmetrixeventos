@@ -58,6 +58,10 @@ class EventController extends Controller
                 'checkout_code' => $generatedQrs['QR3']->code ?? null,
             ]);
 
+            // Generate and store QR code images
+            $qrImagePaths = $this->qrCodeService->generateAndStoreQrImages($event);
+            $event->update($qrImagePaths);
+
             // Generate militant QR codes if U4 is in target universe
             if (isset($data['target_universes']) && is_array($data['target_universes']) && in_array('U4', $data['target_universes'])) {
                 $this->militantQrService->generateEventMilitantQrs($event);

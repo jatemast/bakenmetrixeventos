@@ -26,7 +26,7 @@ class PersonaSeeder extends Seeder
             'numero_celular' => '1234567890',
             'numero_telefono' => '0987654321',
             'is_leader' => false,
-            'bonus_points' => 100,
+            'loyalty_balance' => 100,
             'universe_type' => 'U1',
         ]);
 
@@ -48,8 +48,8 @@ class PersonaSeeder extends Seeder
             'numero_telefono' => '1234567890',
             'is_leader' => true,
             'referral_code' => 'LEADER123',
-            'bonus_points' => 50,
-            'universe_type' => 'U2',
+            'loyalty_balance' => 500,
+            'universe_type' => 'U3',
         ]);
     }
 }

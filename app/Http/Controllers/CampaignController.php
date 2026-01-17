@@ -6,6 +6,7 @@ use App\Http\Requests\CampaignRequest;
 use App\Models\Campaign;
 use App\Models\Persona;
 use App\Services\CsvSegmentationService;
+use App\Services\MilitantQrService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -13,6 +14,13 @@ use Illuminate\Support\Facades\Log;
 
 class CampaignController extends Controller
 {
+    protected $militantQrService;
+
+    public function __construct(MilitantQrService $militantQrService)
+    {
+        $this->militantQrService = $militantQrService;
+    }
+
     /**
      * Store a newly created campaign in storage.
      */
@@ -50,10 +58,20 @@ class CampaignController extends Controller
             }
         }
 
+        // Generate militant QR codes when campaign is created
+        $militantQrStats = null;
+        try {
+            $militantQrStats = $this->militantQrService->generateCampaignMilitantQrs($campaign);
+            Log::info("Generated militant QR codes for campaign {$campaign->id}", $militantQrStats);
+        } catch (\Exception $e) {
+            Log::error("Error generating militant QRs for campaign {$campaign->id}: {$e->getMessage()}");
+        }
+
         return response()->json([
             'message' => 'Campaña creada exitosamente',
             'campaign' => $campaign,
-            'segmentation_processing' => $processingStats
+            'segmentation_processing' => $processingStats,
+            'militant_qr_generation' => $militantQrStats
         ], 201);
     }
 
@@ -394,6 +412,25 @@ class CampaignController extends Controller
             'success' => true,
             'file_type' => $fileType,
             'preview' => $preview
+        ]);
+    }
+
+    /**
+     * Get militant QR distribution data for n8n workflow
+     * Returns all militants with their QR codes ready for WhatsApp distribution
+     * 
+     * @param string $id Campaign ID
+     * @return JsonResponse
+     */
+    public function getMilitantQrsForDistribution(string $id): JsonResponse
+    {
+        $campaign = Campaign::findOrFail($id);
+        
+        $distributionData = $this->militantQrService->getMilitantQrsForDistribution($campaign);
+
+        return response()->json([
+            'success' => true,
+            'data' => $distributionData
         ]);
     }
 }

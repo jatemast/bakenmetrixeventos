@@ -7,6 +7,7 @@ use App\Models\Event;
 use App\Models\Persona;
 use SimpleSoftwareIO\QrCode\Facades\QrCode as QrCodeGenerator;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 
 class QrCodeService
 {
@@ -31,13 +32,33 @@ class QrCodeService
         // QR3: Exit validation
         $qrCodes['QR3'] = $this->createQrCode($event, 'QR3');
         
-        // QR2-L: Leader guest entry codes (generate for all leaders in event)
-        $leaders = Persona::where('is_leader', true)->get();
+        // QR2-L: Leader guest entry codes - generate for leaders with universe U3
+        $leaders = Persona::where('is_leader', true)
+            ->where('universe_type', 'U3')
+            ->get();
+        
         $qrCodes['QR2-L'] = [];
         
         foreach ($leaders as $leader) {
-            $qrCodes['QR2-L'][$leader->id] = $this->createLeaderQrCode($event, $leader);
+            $existing = QrCode::where('event_id', $event->id)
+                ->where('leader_id', $leader->id)
+                ->where('type', 'QR2-L')
+                ->first();
+            
+            if ($existing) {
+                $qrCodes['QR2-L'][$leader->id] = $existing;
+            } else {
+                $qrCodes['QR2-L'][$leader->id] = $this->createLeaderQrCode($event, $leader);
+            }
         }
+        
+        \Log::info('Generated QR codes for event', [
+            'event_id' => $event->id,
+            'qr1' => $qrCodes['QR1']->code,
+            'qr2' => $qrCodes['QR2']->code,
+            'qr3' => $qrCodes['QR3']->code,
+            'leader_qrs_count' => count($qrCodes['QR2-L']),
+        ]);
         
         return $qrCodes;
     }
@@ -188,5 +209,47 @@ class QrCodeService
     public function deactivateEventQrCodes(Event $event)
     {
         QrCode::where('event_id', $event->id)->update(['is_active' => false]);
+    }
+
+    /**
+     * Generate and store QR code images when event is created
+     * Returns paths to store in database
+     */
+    public function generateAndStoreQrImages(Event $event): array
+    {
+        $paths = [];
+        
+        // Ensure storage directory exists
+        Storage::disk('public')->makeDirectory('qrcodes');
+        
+        // QR1: Invitation - Uses event ID
+        $qr1Url = url("/invitation/event-{$event->id}");
+        $qr1Image = QrCodeGenerator::format('png')->size(500)->generate($qr1Url);
+        $qr1Path = "qrcodes/event-{$event->id}-qr1-invitation.png";
+        Storage::disk('public')->put($qr1Path, $qr1Image);
+        $paths['qr1_image_path'] = $qr1Path;
+        
+        // QR2: Check-in - Uses checkin_code
+        $qr2Url = url("/events/public/{$event->checkin_code}");
+        $qr2Image = QrCodeGenerator::format('png')->size(500)->generate($qr2Url);
+        $qr2Path = "qrcodes/event-{$event->id}-qr2-checkin.png";
+        Storage::disk('public')->put($qr2Path, $qr2Image);
+        $paths['qr2_image_path'] = $qr2Path;
+        
+        // QR3: Check-out - Uses checkout_code
+        $qr3Url = url("/events/checkout/{$event->checkout_code}");
+        $qr3Image = QrCodeGenerator::format('png')->size(500)->generate($qr3Url);
+        $qr3Path = "qrcodes/event-{$event->id}-qr3-checkout.png";
+        Storage::disk('public')->put($qr3Path, $qr3Image);
+        $paths['qr3_image_path'] = $qr3Path;
+        
+        \Log::info('Generated and stored QR images for event', [
+            'event_id' => $event->id,
+            'qr1_path' => $qr1Path,
+            'qr2_path' => $qr2Path,
+            'qr3_path' => $qr3Path,
+        ]);
+        
+        return $paths;
     }
 }

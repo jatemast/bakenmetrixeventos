@@ -15,6 +15,8 @@ use App\Http\Controllers\BonusController;
 use App\Http\Controllers\GroupController;
 use App\Http\Controllers\RedemptionController;
 use App\Http\Controllers\PublicRegistrationController;
+use App\Http\Controllers\MilitantQrController;
+use App\Http\Controllers\QrImageController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -40,19 +42,24 @@ Route::post('/qr/scan/manual-checkin', [QrScanController::class, 'manualCheckIn'
 Route::post('/qr/scan/manual-checkout', [QrScanController::class, 'manualCheckOut']);
 Route::get('/qr/{code}/details', [QrScanController::class, 'qrDetails']);
 
+// QR Code Data Endpoint (for n8n - fetches stored QR images)
+Route::get('/events/{eventId}/qr-data', [QrImageController::class, 'getEventQrData']);
+
 // WhatsApp AI Context Resolution Routes (for n8n integration)
 Route::post('/whatsapp/resolve-event-context', [WhatsAppController::class, 'resolveEventContext']);
 Route::post('/whatsapp/log-conversation', [WhatsAppController::class, 'logAiConversation']);
 
-// Invitation Routes (for n8n integration)
+// Invitation Routes 
 Route::post('/invitations/log', [InvitationController::class, 'log']);
 Route::post('/events/{id}/invitations-complete', [InvitationController::class, 'complete']);
 Route::post('/events/{id}/documents-ready', [EventController::class, 'documentsReady']);
 
-// Campaign Personas & Segmentation Routes (for n8n integration)
+// Campaign Personas & Segmentation Routes
 Route::get('/campaigns/{id}/personas', [CampaignController::class, 'personas']);
 Route::post('/campaigns/{id}/process-segmentation', [CampaignController::class, 'processSegmentation']);
 Route::post('/campaigns/{id}/validate-segmentation', [CampaignController::class, 'validateSegmentation']);
+Route::get('/campaigns/{id}/preview-segmentation', [CampaignController::class, 'previewSegmentation']);
+Route::get('/campaigns/{id}/militant-qrs-distribution', [CampaignController::class, 'getMilitantQrsForDistribution']);
 Route::get('/campaigns/{id}/preview-segmentation', [CampaignController::class, 'previewSegmentation']);
 
 Route::get('/campaigns/{campaignId}/events', [EventController::class, 'index']);
@@ -139,6 +146,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Persona Bonus Points
     Route::get('/personas/{persona}/bonus-points', [PersonaController::class, 'bonusPoints']);
     Route::get('/personas/{persona}/bonus-point-history', [PersonaController::class, 'bonusPoints']);
+    
+    // Militant QR Management (Admin only)
+    Route::get('/campaigns/{campaignId}/militant-qrs', [MilitantQrController::class, 'getCampaignMilitantQrs']);
+    Route::post('/campaigns/{campaignId}/militant-qrs/generate', [MilitantQrController::class, 'generateCampaignMilitantQrs']);
+    Route::post('/campaigns/{campaignId}/militant-qrs/persona/{personaId}/regenerate', [MilitantQrController::class, 'regenerateMilitantQr']);
+    Route::get('/campaigns/{campaignId}/militant-qrs/stats', [MilitantQrController::class, 'getMilitantQrStats']);
 });
 
 // Personas Routes (public)
