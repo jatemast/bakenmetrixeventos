@@ -17,6 +17,7 @@ use App\Http\Controllers\RedemptionController;
 use App\Http\Controllers\PublicRegistrationController;
 use App\Http\Controllers\MilitantQrController;
 use App\Http\Controllers\QrImageController;
+use App\Http\Controllers\UserPortalController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -28,6 +29,21 @@ Route::post('/public/check-whatsapp', [PublicRegistrationController::class, 'che
 Route::post('/public/register', [PublicRegistrationController::class, 'register']);
 Route::post('/public/register-event', [PublicRegistrationController::class, 'registerForEvent']);
 Route::post('/public/profile', [PublicRegistrationController::class, 'getPersonaProfile']);
+
+// User Portal Routes (Citizen Self-Service)
+// OTP Authentication (public - no token required)
+Route::post('/portal/request-otp', [UserPortalController::class, 'requestOtp']);
+Route::post('/portal/verify-otp', [UserPortalController::class, 'verifyOtp']);
+
+// Secured Portal Endpoints (require X-Portal-Token header)
+Route::post('/portal/logout', [UserPortalController::class, 'logout']);
+Route::post('/portal/profile', [UserPortalController::class, 'getProfile']);
+Route::post('/portal/events/upcoming', [UserPortalController::class, 'getUpcomingEvents']);
+Route::post('/portal/events/history', [UserPortalController::class, 'getEventHistory']);
+Route::post('/portal/events/{eventId}', [UserPortalController::class, 'getEventDetails']);
+Route::post('/portal/loyalty/history', [UserPortalController::class, 'getLoyaltyHistory']);
+Route::post('/portal/redemptions', [UserPortalController::class, 'getRedemptions']);
+Route::post('/portal/preferences', [UserPortalController::class, 'updatePreferences']);
 
 // Ruta pública para ver un evento por su código de check-in
 Route::get('/events/public/{checkinCode}', [EventController::class, 'showPublic']);
@@ -49,7 +65,7 @@ Route::get('/events/{eventId}/qr-data', [QrImageController::class, 'getEventQrDa
 Route::post('/whatsapp/resolve-event-context', [WhatsAppController::class, 'resolveEventContext']);
 Route::post('/whatsapp/log-conversation', [WhatsAppController::class, 'logAiConversation']);
 
-// Invitation Routes 
+// Invitation Routes
 Route::post('/invitations/log', [InvitationController::class, 'log']);
 Route::post('/events/{id}/invitations-complete', [InvitationController::class, 'complete']);
 Route::post('/events/{id}/documents-ready', [EventController::class, 'documentsReady']);
@@ -98,7 +114,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/campaigns/{campaignId}/events', [EventController::class, 'index']);
     Route::put('/events/{id}', [EventController::class, 'update']);
     Route::get('/events/{id}/qr-codes', [EventController::class, 'getQrCodes']);
-    
+
     // Event Post-Processing (Queue-based)
     Route::post('/events/{id}/end', [EventController::class, 'endEvent']);
 
@@ -133,6 +149,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/redemptions/stats', [RedemptionController::class, 'getStats']);
 
     // Report Routes
+    Route::get('/reports/dashboard', [ReportController::class, 'dashboardOverview']);
+    Route::get('/reports/overview', [ReportController::class, 'reportsOverview']);
+    Route::get('/reports/export', [ReportController::class, 'exportReports']);
     Route::get('/reports/campaign/{campaignId}', [ReportController::class, 'campaignStats']);
     Route::get('/reports/event/{eventId}/attendance', [ReportController::class, 'eventAttendance']);
     Route::get('/reports/universe-distribution', [ReportController::class, 'universeDistribution']);

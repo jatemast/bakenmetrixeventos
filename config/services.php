@@ -25,6 +25,7 @@ return [
 
     'n8n' => [
         'notification_webhook_url' => env('N8N_NOTIFICATION_WEBHOOK_URL'),
+        'portal_otp_webhook' => env('N8N_PORTAL_OTP_WEBHOOK'),
     ],
 
 ];

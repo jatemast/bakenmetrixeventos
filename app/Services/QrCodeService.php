@@ -6,6 +6,12 @@ use App\Models\QrCode;
 use App\Models\Event;
 use App\Models\Persona;
 use SimpleSoftwareIO\QrCode\Facades\QrCode as QrCodeGenerator;
+use BaconQrCode\Renderer\ImageRenderer;
+use BaconQrCode\Renderer\Image\SvgImageBackEnd;
+use BaconQrCode\Renderer\Image\ImagickImageBackEnd;
+use BaconQrCode\Renderer\Image\EpsImageBackEnd;
+use BaconQrCode\Renderer\RendererStyle\RendererStyle;
+use BaconQrCode\Writer;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
 
@@ -222,24 +228,31 @@ class QrCodeService
         // Ensure storage directory exists
         Storage::disk('public')->makeDirectory('qrcodes');
         
+        // Create QR code writer with SVG backend (works without imagick or GD)
+        $renderer = new ImageRenderer(
+            new RendererStyle(500),
+            new SvgImageBackEnd()
+        );
+        $writer = new Writer($renderer);
+        
         // QR1: Invitation - Uses event ID
         $qr1Url = url("/invitation/event-{$event->id}");
-        $qr1Image = QrCodeGenerator::format('png')->size(500)->generate($qr1Url);
-        $qr1Path = "qrcodes/event-{$event->id}-qr1-invitation.png";
+        $qr1Image = $writer->writeString($qr1Url);
+        $qr1Path = "qrcodes/event-{$event->id}-qr1-invitation.svg";
         Storage::disk('public')->put($qr1Path, $qr1Image);
         $paths['qr1_image_path'] = $qr1Path;
         
         // QR2: Check-in - Uses checkin_code
         $qr2Url = url("/events/public/{$event->checkin_code}");
-        $qr2Image = QrCodeGenerator::format('png')->size(500)->generate($qr2Url);
-        $qr2Path = "qrcodes/event-{$event->id}-qr2-checkin.png";
+        $qr2Image = $writer->writeString($qr2Url);
+        $qr2Path = "qrcodes/event-{$event->id}-qr2-checkin.svg";
         Storage::disk('public')->put($qr2Path, $qr2Image);
         $paths['qr2_image_path'] = $qr2Path;
         
         // QR3: Check-out - Uses checkout_code
         $qr3Url = url("/events/checkout/{$event->checkout_code}");
-        $qr3Image = QrCodeGenerator::format('png')->size(500)->generate($qr3Url);
-        $qr3Path = "qrcodes/event-{$event->id}-qr3-checkout.png";
+        $qr3Image = $writer->writeString($qr3Url);
+        $qr3Path = "qrcodes/event-{$event->id}-qr3-checkout.svg";
         Storage::disk('public')->put($qr3Path, $qr3Image);
         $paths['qr3_image_path'] = $qr3Path;
         
