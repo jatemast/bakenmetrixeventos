@@ -11,40 +11,57 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Check if whatsapp_sessions table exists
+        // Verificamos si la tabla existe
         if (Schema::hasTable('whatsapp_sessions')) {
             Schema::table('whatsapp_sessions', function (Blueprint $table) {
-                // CRITICAL: Add context_namespace for AI agent isolation
-                // Format: campaign_{id}_event_{id}
+                // Agregamos event_id si no existe
+                if (!Schema::hasColumn('whatsapp_sessions', 'event_id')) {
+                    $table->foreignId('event_id')->nullable()->constrained()->onDelete('cascade');
+                }
+
+                // Agregamos persona_id si no existe
+                if (!Schema::hasColumn('whatsapp_sessions', 'persona_id')) {
+                    $table->foreignId('persona_id')->nullable()->constrained()->onDelete('set null');
+                }
+
+                // Agregamos context_namespace si no existe
                 if (!Schema::hasColumn('whatsapp_sessions', 'context_namespace')) {
-                    $table->string('context_namespace', 255)->nullable()->after('event_id');
+                    $table->string('context_namespace', 255)->nullable();
                 }
-                
-                // Add AI agent control flag
+
+                // Agregamos ai_agent_enabled si no existe
                 if (!Schema::hasColumn('whatsapp_sessions', 'ai_agent_enabled')) {
-                    $table->boolean('ai_agent_enabled')->default(true)->after('context_namespace');
+                    $table->boolean('ai_agent_enabled')->default(true);
                 }
-                
-                // Add session status tracking
+
+                // Agregamos session_status si no existe
                 if (!Schema::hasColumn('whatsapp_sessions', 'session_status')) {
                     $table->enum('session_status', ['active', 'expired', 'closed'])
-                        ->default('active')->after('ai_agent_enabled');
+                        ->default('active');
+                }
+
+                // Agregamos columnas adicionales si no existen
+                if (!Schema::hasColumn('whatsapp_sessions', 'last_message_at')) {
+                    $table->timestamp('last_message_at')->nullable();
+                }
+                if (!Schema::hasColumn('whatsapp_sessions', 'message_count')) {
+                    $table->integer('message_count')->default(0);
                 }
             });
         } else {
-            // Create the table if it doesn't exist
+            // Creamos la tabla si no existe
             Schema::create('whatsapp_sessions', function (Blueprint $table) {
                 $table->id();
-                $table->foreignId('event_id')->constrained()->onDelete('cascade');
+                $table->foreignId('event_id')->nullable()->constrained()->onDelete('cascade');
                 $table->foreignId('persona_id')->nullable()->constrained()->onDelete('set null');
                 $table->string('whatsapp_number', 20);
-                $table->string('context_namespace', 255); // campaign_{id}_event_{id}
+                $table->string('context_namespace', 255)->nullable();
                 $table->boolean('ai_agent_enabled')->default(true);
                 $table->enum('session_status', ['active', 'expired', 'closed'])->default('active');
                 $table->timestamp('last_message_at')->nullable();
                 $table->integer('message_count')->default(0);
                 $table->timestamps();
-                
+
                 // Indexes
                 $table->index('whatsapp_number');
                 $table->index('context_namespace');
@@ -59,15 +76,14 @@ return new class extends Migration
     public function down(): void
     {
         if (Schema::hasTable('whatsapp_sessions')) {
-            // Check if we created the table or just modified it
-            // If the table has very few columns, we created it
+            // Lista de columnas actuales
             $columns = Schema::getColumnListing('whatsapp_sessions');
-            
-            if (count($columns) > 10) {
-                // We created it, so drop the whole table
+
+            if (count($columns) <= 10) {
+                // Probablemente la tabla fue creada por esta migración
                 Schema::dropIfExists('whatsapp_sessions');
             } else {
-                // We only modified it, so just drop the new columns
+                // Eliminamos solo las columnas nuevas
                 Schema::table('whatsapp_sessions', function (Blueprint $table) {
                     if (Schema::hasColumn('whatsapp_sessions', 'session_status')) {
                         $table->dropColumn('session_status');
@@ -78,6 +94,13 @@ return new class extends Migration
                     if (Schema::hasColumn('whatsapp_sessions', 'context_namespace')) {
                         $table->dropColumn('context_namespace');
                     }
+                    if (Schema::hasColumn('whatsapp_sessions', 'last_message_at')) {
+                        $table->dropColumn('last_message_at');
+                    }
+                    if (Schema::hasColumn('whatsapp_sessions', 'message_count')) {
+                        $table->dropColumn('message_count');
+                    }
+                    // NOTA: No eliminamos event_id ni persona_id en down
                 });
             }
         }

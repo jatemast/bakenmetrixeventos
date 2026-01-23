@@ -28,6 +28,7 @@ class EventAttendee extends Model
         'attendance_duration_minutes',
         'points_earned',
         'points_distributed',
+        'exit_time',
     ];
 
     protected $casts = [

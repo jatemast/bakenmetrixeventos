@@ -18,6 +18,9 @@ return new class extends Migration
             $table->foreignId('leader_id')->nullable()->constrained('personas')->onDelete('set null'); // Líder que refirió
             $table->timestamp('checkin_at')->nullable();
             $table->timestamp('checkout_at')->nullable();
+            $table->timestamp('entry_time')->nullable(); // agregamos entry_time
+            $table->timestamp('exit_time')->nullable();  // quitamos ->after()
+
             $table->timestamps();
         });
     }
