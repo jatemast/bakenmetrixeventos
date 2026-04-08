@@ -170,7 +170,7 @@ class BonusPointsService
             $leaderGuestCounts[$leaderId]['guest_ids'][] = $attendee->persona_id;
         }
 
-        $bonusPerGuest = $event->bonus_points_for_leader ?? 10;
+        $bonusPerGuest = $event->bonus_points_per_referral ?? $event->bonus_points_for_leader ?? 10;
         $totalLeaderPoints = 0;
         $leadersProcessed = 0;
         $details = [];

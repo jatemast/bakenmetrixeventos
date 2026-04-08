@@ -316,6 +316,75 @@ class AttendanceController extends Controller
     }
 
     /**
+     * @OA\Post(
+     *     path="/api/events/checkin-by-code",
+     *     summary="Check-in de ciudadano mediante Código CDZ",
+     *     tags={"Attendance"},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             @OA\Property(property="codigo_ciudadano", type="string", example="CDZ-A1B2C3"),
+     *             @OA\Property(property="checkin_code", type="string", example="EVENT123")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Check-in exitoso"
+     *     ),
+     *     @OA\Response(
+     *         response=409,
+     *         description="Ya registrado"
+     *     )
+     * )
+     * Handle event check-in using Citizen Code (CDZ).
+     */
+    public function checkinByCode(Request $request): JsonResponse
+    {
+        $request->validate([
+            'codigo_ciudadano' => 'required|string',
+            'checkin_code' => 'required|string'
+        ]);
+
+        $event = Event::where('checkin_code', $request->checkin_code)->firstOrFail();
+        $persona = Persona::where('codigo_ciudadano', $request->codigo_ciudadano)->first();
+
+        if (!$persona) {
+            return response()->json(['message' => 'Código de ciudadano no válido.'], 404);
+        }
+
+        // Verificar si ya ha hecho check-in
+        $existing = EventAttendee::where('event_id', $event->id)
+            ->where('persona_id', $persona->id)
+            ->whereNotNull('checkin_at')
+            ->first();
+
+        if ($existing) {
+            return response()->json(['message' => 'Ya registrado en este evento.'], 409);
+        }
+
+        DB::beginTransaction();
+        try {
+            EventAttendee::create([
+                'event_id' => $event->id,
+                'persona_id' => $persona->id,
+                'checkin_at' => now(),
+            ]);
+
+            DB::commit();
+            return response()->json([
+                'success' => true,
+                'message' => '¡Check-in con éxito!',
+                'persona_name' => $persona->nombre . ' ' . $persona->apellido_paterno,
+                'persona_code' => $persona->codigo_ciudadano
+            ], 200);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Error: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Handle event check-in.
      */
     public function checkin(EventCheckinRequest $request): JsonResponse

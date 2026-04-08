@@ -13,16 +13,26 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
-            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
             \App\Http\Middleware\HandleCors::class,
+            \App\Http\Middleware\SecurityHeadersMiddleware::class,
+            \Illuminate\Routing\Middleware\ThrottleRequests::class . ':60,1',
+            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
+            \App\Http\Middleware\TenantMiddleware::class,
+            \App\Http\Middleware\ApiLoggingMiddleware::class,
         ]);
 
         $middleware->alias([
-            'verified' => \App\Http\Middleware\EnsureEmailIsVerified::class,
+            'tenant' => \App\Http\Middleware\TenantMiddleware::class,
         ]);
 
         $middleware->web(append: [
-            \App\Http\Middleware\HandleCors::class,
+            \App\Http\Middleware\TenantMiddleware::class,
+        ]);
+
+        $middleware->validateCsrfTokens(except: [
+            'api/public/register',
+            'api/public/store-super-persona',
+            'api/public/*'
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

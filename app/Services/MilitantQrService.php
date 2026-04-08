@@ -6,6 +6,7 @@ use App\Models\Campaign;
 use App\Models\Event;
 use App\Models\Persona;
 use App\Models\QrCode;
+use App\Services\LoyaltyPointService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -21,16 +22,20 @@ use Illuminate\Support\Str;
  */
 class MilitantQrService
 {
+    public function __construct(
+        private readonly LoyaltyPointService $loyaltyService
+    ) {}
+
     /**
-     * Generate campaign-level personalized QR codes for all militants
+     * Generate campaign-level personalized QR codes for all militants (U3, U4)
      * 
      * @param Campaign $campaign
      * @return array Statistics and QR code data
      */
     public function generateCampaignMilitantQrs(Campaign $campaign): array
     {
-        // Get all militants (U4) in the system
-        $militants = Persona::where('universe_type', 'U4')->get();
+        // Get all militants (U4) and leaders (U3) in the system
+        $militants = Persona::whereIn('universe_type', ['U3', 'U4'])->get();
 
         $stats = [
             'total_militants' => $militants->count(),
@@ -400,6 +405,23 @@ class MilitantQrService
             // Calculate attendance duration
             $durationMinutes = $attendee->checkin_at->diffInMinutes(now());
 
+            // ANTIFRAUD: Validate event checkout rules
+            if (!$event->is_checkout_active) {
+                return [
+                    'success' => false,
+                    'message' => 'El horario de salida aún no está habilitado.',
+                    'error_code' => 'CHECKOUT_LOCKED'
+                ];
+            }
+
+            if ($durationMinutes < $event->minimum_minutes_for_points) {
+                return [
+                    'success' => false,
+                    'message' => 'Tiempo de estancia insuficiente (' . $durationMinutes . ' mins). Se requieren ' . $event->minimum_minutes_for_points . ' minutos.',
+                    'error_code' => 'MIN_TIME_NOT_MET'
+                ];
+            }
+
             // Fast-track check-out
             $attendee->update([
                 'checkout_at' => now(),
@@ -413,6 +435,9 @@ class MilitantQrService
             ]);
 
             $qr->increment('scan_count');
+
+            // DISPARAR MOTOR DE PUNTOS AL SALIR
+            $this->loyaltyService->processPointsForAttendee($attendee);
 
             Log::info("Militant fast-track exit", [
                 'persona_id' => $persona->id,

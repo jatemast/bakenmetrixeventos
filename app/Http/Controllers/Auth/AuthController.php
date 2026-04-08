@@ -12,12 +12,42 @@ use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
 {
-    public function register(RegisterRequest $request)
+    public function register(Request $request)
     {
+        // DEBUG LOG (Standard Log already present)
+        \Illuminate\Support\Facades\Log::debug('Register Attempt Data:', $request->all());
+
+        $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
+            'password' => ['required', 'string', 'min:4'], // Bajar a 4 y quitar confirmed para prueba rápida
+        ]);
+
+        if ($validator->fails()) {
+            \Illuminate\Support\Facades\Log::error('Register Validation Errors:', $validator->errors()->toArray());
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $tenantId = $request->tenant_id;
+
+        // If no tenant_id provided, create a new one automatically
+        if (empty($tenantId)) {
+            $tenant = \App\Models\Tenant::create([
+                'name' => 'Universo de ' . $request->name,
+                'slug' => \Illuminate\Support\Str::slug($request->name . '-' . uniqid()),
+            ]);
+            $tenantId = $tenant->id;
+        }
+
         $user = User::create([
+            'tenant_id' => $tenantId,
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
+            'role' => 'admin',
         ]);
 
         $token = $user->createToken('auth_token')->plainTextToken;
@@ -26,6 +56,7 @@ class AuthController extends Controller
             'message' => 'Registro exitoso',
             'access_token' => $token,
             'token_type' => 'Bearer',
+            'tenant_id' => $user->tenant_id,
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
@@ -34,19 +65,29 @@ class AuthController extends Controller
 
     public function login(LoginRequest $request)
     {
-        if (!Auth::attempt($request->only('email', 'password'))) {
-            return response()->json([
-                'message' => 'Credenciales inválidas'
-            ], 401);
+        \Illuminate\Support\Facades\Log::info('Login Attempt for: ' . $request->email);
+
+        // Bypass global tenant scope to find the user row during login
+        $user = User::withoutGlobalScopes()->where('email', $request->email)->first();
+
+        if (!$user) {
+            \Illuminate\Support\Facades\Log::warning('Login Failed: User not found for ' . $request->email);
+            return response()->json(['message' => 'Credenciales inválidas'], 401);
         }
 
-        $user = User::where('email', $request->email)->firstOrFail();
+        if (!\Illuminate\Support\Facades\Hash::check($request->password, $user->password)) {
+            \Illuminate\Support\Facades\Log::warning('Login Failed: Password mismatch for ' . $request->email);
+            return response()->json(['message' => 'Credenciales inválidas'], 401);
+        }
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
             'message' => 'Inicio de sesión exitoso',
             'access_token' => $token,
             'token_type' => 'Bearer',
+            'tenant_id' => $user->tenant_id,
+            'tenant_name' => $user->tenant->name ?? null,
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,

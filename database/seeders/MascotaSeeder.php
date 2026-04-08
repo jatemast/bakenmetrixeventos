@@ -11,14 +11,14 @@ class MascotaSeeder extends Seeder
     {
         Mascota::create([
             'persona_id' => 1,
-            'reino_animal' => 'Perro',
+            'reino' => 'canino',
             'edad' => 3,
             'nombre' => 'Buddy',
         ]);
 
         Mascota::create([
             'persona_id' => 2,
-            'reino_animal' => 'Gato',
+            'reino' => 'felino',
             'edad' => 2,
             'nombre' => 'Whiskers',
         ]);
