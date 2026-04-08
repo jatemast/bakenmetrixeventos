@@ -19,6 +19,89 @@ use Carbon\Carbon;
 class ReportController extends Controller
 {
     /**
+     * @OA\Get(
+     *     path="/api/metrics/impact-kpi",
+     *     summary="Obtener KPIs de Impacto de un Evento",
+     *     tags={"Metrics"},
+     *     @OA\Parameter(
+     *         name="event_id",
+     *         in="query",
+     *         required=true,
+     *         description="ID del evento",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Datos de impacto recuperados con éxito",
+     *         @OA\JsonContent()
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Evento no encontrado"
+     *     )
+     * )
+     * Get detailed Impact KPIs for a specific event.
+     * Includes effective attendance, conversion rates, and demographic breakdown.
+     */
+    public function eventImpactKPI(Request $request): JsonResponse
+    {
+        $eventId = $request->query('event_id');
+        if (!$eventId) return response()->json(['success' => false, 'message' => 'Event ID required'], 400);
+
+        $event = Event::select('id', 'detail', 'date', 'neighborhood', 'municipality')->find($eventId);
+        if (!$event) return response()->json(['success' => false, 'message' => 'Event not found'], 404);
+
+        // Core KPIs
+        $totalRegistered = EventAttendee::where('event_id', $eventId)->count();
+        $totalAttended = EventAttendee::where('event_id', $eventId)->whereNotNull('checkin_at')->count();
+        $conversionRate = $totalRegistered > 0 ? round(($totalAttended / $totalRegistered) * 100, 2) : 0;
+
+        // Demographic Breakdown (from checked-in personas)
+        $attendeeIds = EventAttendee::where('event_id', $eventId)->whereNotNull('checkin_at')->pluck('persona_id');
+        
+        $genderBreakdown = Persona::whereIn('id', $attendeeIds)
+            ->select('sexo', DB::raw('count(*) as count'))
+            ->groupBy('sexo')->get();
+
+        $averageAge = Persona::whereIn('id', $attendeeIds)->avg('edad');
+
+        // Interest Tree Breakdown (Tags that match this event's context)
+        // We look at the most frequent tags among attendees
+        $topInterests = DB::table('persona_tags')
+            ->whereIn('persona_id', $attendeeIds)
+            ->join('tags', 'tags.id', '=', 'persona_tags.tag_id')
+            ->select('tags.nombre', DB::raw('count(*) as count'))
+            ->groupBy('tags.nombre')
+            ->orderBy('count', 'desc')
+            ->limit(5)
+            ->get();
+
+        // Growth: New Citizens vs Returning
+        $eventDate = $event->date;
+        $newCitizens = Persona::whereIn('id', $attendeeIds)
+            ->whereDate('created_at', $eventDate)
+            ->count();
+        $returningCitizens = $totalAttended - $newCitizens;
+
+        return response()->json([
+            'success' => true,
+            'event' => $event,
+            'kpis' => [
+                'impact_score' => $totalAttended,
+                'conversion_rate' => $conversionRate . '%',
+                'retention_rate' => round(($returningCitizens / max(1, $totalAttended)) * 100, 1) . '%',
+                'new_acquisition' => $newCitizens
+            ],
+            'breakdown' => [
+                'gender' => $genderBreakdown,
+                'average_age' => round($averageAge, 1),
+                'top_interests' => $topInterests
+            ],
+            'timestamp' => now()->toISOString()
+        ]);
+    }
+
+    /**
      * Get dashboard overview statistics
      */
     public function dashboardOverview(): JsonResponse
@@ -353,6 +436,51 @@ class ReportController extends Controller
             $filename = '';
             
             switch ($reportType) {
+                case 'segmented':
+                    $csvData[] = ['Clave Elector/CURP', 'Nombre', 'Apellidos', 'Municipio', 'Colonia', 'Edad', 'Sexo', 'Universo', 'Teléfono'];
+                    
+                    $minAge = $request->query('min_age');
+                    $maxAge = $request->query('max_age');
+                    $universe = $request->query('universe');
+                    $municipio = $request->query('municipio');
+                    $colonia = $request->query('colonia');
+                    $search = $request->query('search');
+
+                    $personas = Persona::query()
+                        ->when($universe, fn($q) => $q->where('universe_type', $universe))
+                        ->when($municipio, fn($q) => $q->where('municipio', $municipio))
+                        ->when($colonia, fn($q) => $q->where('colonia', $colonia))
+                        ->when($minAge, fn($q) => $q->where('edad', '>=', $minAge))
+                        ->when($maxAge, fn($q) => $q->where('edad', '<=', $maxAge))
+                        ->when($search, function($q) use ($search) {
+                            $q->where(function($sq) use ($search) {
+                                $sq->where('nombre', 'like', "%$search%")
+                                  ->orWhere('apellido_paterno', 'like', "%$search%")
+                                  ->orWhere('curp', 'like', "%$search%")
+                                  ->orWhere('clave_elector', 'like', "%$search%")
+                                  ->orWhere('numero_celular', 'like', "%$search%");
+                            });
+                        })
+                        ->orderBy('municipio')
+                        ->orderBy('colonia')
+                        ->get();
+
+                    foreach ($personas as $p) {
+                        $csvData[] = [
+                            $p->clave_elector ?: $p->curp,
+                            $p->nombre,
+                            $p->apellido_paterno . ' ' . $p->apellido_materno,
+                            $p->municipio,
+                            $p->colonia,
+                            $p->edad,
+                            $p->sexo,
+                            $p->universe_type,
+                            $p->numero_celular
+                        ];
+                    }
+                    $filename = "segmented_report_" . now()->format('Y-m-d_His') . ".csv";
+                    break;
+
                 case 'events':
                     $csvData[] = ['ID', 'Evento', 'Campaña', 'Fecha', 'Estado', 'Capacidad', 'Registrados', 'Asistentes', 'Completados', 'Tasa Asistencia'];
                     

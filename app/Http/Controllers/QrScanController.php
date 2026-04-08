@@ -6,6 +6,7 @@ use App\Models\QrCode;
 use App\Models\Event;
 use App\Models\EventAttendee;
 use App\Services\MilitantQrService;
+use App\Services\LoyaltyPointService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
@@ -20,12 +21,10 @@ use Illuminate\Support\Facades\Log;
  */
 class QrScanController extends Controller
 {
-    protected MilitantQrService $militantQrService;
-
-    public function __construct(MilitantQrService $militantQrService)
-    {
-        $this->militantQrService = $militantQrService;
-    }
+    public function __construct(
+        private readonly MilitantQrService $militantQrService,
+        private readonly LoyaltyPointService $loyaltyService
+    ) {}
 
     /**
      * Universal QR scan endpoint
@@ -325,6 +324,25 @@ class QrScanController extends Controller
         // Calculate duration
         $durationMinutes = $attendee->checkin_at->diffInMinutes(now());
 
+        // ANTIFRAUD: Validate event checkout rules
+        if (!$event->is_checkout_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'El horario de salida aún no está habilitado para este evento.',
+                'error_code' => 'CHECKOUT_LOCKED'
+            ], 403);
+        }
+
+        if ($durationMinutes < $event->minimum_minutes_for_points) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No has cumplido con el tiempo mínimo de estancia en el evento para registrar tu salida y obtener puntos.',
+                'duration_minutes' => $durationMinutes,
+                'required_minutes' => $event->minimum_minutes_for_points,
+                'error_code' => 'MIN_TIME_NOT_MET'
+            ], 403);
+        }
+
         // Update attendee
         $attendee->update([
             'checkout_at' => now(),
@@ -337,6 +355,9 @@ class QrScanController extends Controller
         ]);
 
         $event->increment('attended_count');
+
+        // DISPARAR MOTOR DE PUNTOS AL SALIR
+        $this->loyaltyService->processPointsForAttendee($attendee);
 
         Log::info("Manual check-out completed", [
             'persona_id' => $persona->id,

@@ -9,6 +9,8 @@ use App\Models\QrCode;
 use App\Services\QrCodeService;
 use App\Services\MilitantQrService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use App\Models\Persona;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -62,6 +64,29 @@ class EventController extends Controller
             $qrImagePaths = $this->qrCodeService->generateAndStoreQrImages($event);
             $event->update($qrImagePaths);
 
+            // 1.3 Slots Dinámicos por Tipo de Evento (Pilar 1)
+            $eventType = $event->eventType;
+            if ($eventType && $eventType->requires_appointment) {
+                $slotConfig = $eventType->default_slot_config ?? [
+                    'interval_minutes' => 20,
+                    'capacity_per_slot' => 4
+                ];
+
+                $startTime = $request->input('time', '10:00');
+                $durationHours = $request->input('duration_hours', 8);
+                // Convert to minutes to support fractions (e.g., 3.5 hours)
+                $endTime = \Carbon\Carbon::parse($startTime)->addMinutes((int)($durationHours * 60))->format('H:i');
+                
+                $slotService = app(\App\Services\EventSlotService::class);
+                $slotService->generateSlots(
+                    $event,
+                    $startTime,
+                    $endTime,
+                    $slotConfig['interval_minutes'],
+                    $slotConfig['capacity_per_slot']
+                );
+            }
+
             // Generate militant QR codes if U4 is in target universe
             if (isset($data['target_universes']) && is_array($data['target_universes']) && in_array('U4', $data['target_universes'])) {
                 $this->militantQrService->generateEventMilitantQrs($event);
@@ -88,32 +113,37 @@ class EventController extends Controller
     }
 
     /**
-     * Trigger n8n Notification Workflow for event invitations
+     * Trigger n8n FLOW 7 for mass event invitations
      * 
-     * Uses notification workflow that handles:
-     * - Event invitations
-     * - Militant QR distribution
-     * - Other WhatsApp notifications
+     * Automatically sends invitations to all targeted personas
+     * when a new event is created.
      */
     protected function triggerN8nWorkflow(Event $event)
     {
-        $webhookUrl = config('services.n8n.notification_webhook_url');
+        $webhookUrl = config('services.n8n.webhook_flow7_broadcast_url');
 
         if (!$webhookUrl) {
-            Log::warning('n8n notification webhook URL not configured');
+            Log::warning('n8n broadcast webhook URL not configured (FLOW 7). Skipping auto-invitations.');
             return;
         }
 
         try {
-            Http::post($webhookUrl, [
+            Http::timeout(10)->post($webhookUrl, [
                 'message_type' => 'event_invitation',
                 'event_id' => $event->id,
                 'campaign_id' => $event->campaign_id,
+                'filters' => [
+                    'municipio' => $event->municipality ?? '',
+                    'colonia' => $event->neighborhood ?? '',
+                    'universe' => is_array($event->target_universes) ? implode(',', $event->target_universes) : '',
+                ],
                 'api_base_url' => config('app.url') . '/api',
                 'timestamp' => now()->toIso8601String(),
             ]);
+
+            Log::info("FLOW 7 broadcast triggered for event {$event->id}");
         } catch (\Exception $e) {
-            Log::error('Failed to trigger n8n notification workflow: ' . $e->getMessage());
+            Log::error('Failed to trigger FLOW 7 broadcast: ' . $e->getMessage());
         }
     }
 
@@ -245,14 +275,54 @@ class EventController extends Controller
     }
 
     /**
+     * Get targeted audience for an event based on proximity and universe.
+     * Used by n8n or admin dashboard for invitations.
+     */
+    public function getTargetedAudience(string $id, Request $request): JsonResponse
+    {
+        $event = Event::findOrFail($id);
+        
+        $query = Persona::query();
+        
+        // 1. Proximity Filter (Critical request)
+        // If event has municipality, filter personas in that municipality
+        if ($event->municipality) {
+            $query->where('municipio', 'like', "%{$event->municipality}%");
+        }
+        
+        // If event has neighborhood/colonia, prioritize it or use it as a secondary filter
+        if ($event->neighborhood) {
+            $query->where(fn($q) => $q->where('colonia', 'like', "%{$event->neighborhood}%")
+                  ->orWhere('region', 'like', "%{$event->neighborhood}%"));
+        }
+
+        // 2. Universe Filter (Groups I, II, III, IV)
+        if ($event->target_universes && count($event->target_universes) > 0) {
+            $query->whereIn('universe_type', $event->target_universes);
+        }
+
+        // 3. Optional Status/Engagement Filters
+        $query->orderByDesc('loyalty_balance');
+
+        $personas = $query->paginate($request->input('per_page', 100));
+
+        return response()->json([
+            'success' => true,
+            'event' => [
+                'id' => $event->id,
+                'detail' => $event->detail,
+                'location' => [
+                    'municipality' => $event->municipality,
+                    'neighborhood' => $event->neighborhood,
+                    'state' => $event->state
+                ]
+            ],
+            'personas' => $personas
+        ]);
+    }
+
+    /**
      * Manually end an event and schedule post-event processing
-     * 
-     * This triggers the queue-based automation:
-     * 1. Auto-checkout attendees after grace period
-     * 2. Distribute points to attendees and leaders
-     * 
-     * @param string $id Event ID
-     * @return JsonResponse
      */
     public function endEvent(string $id): JsonResponse
     {
@@ -289,6 +359,9 @@ class EventController extends Controller
             $gracePeriodHours = $event->grace_period_hours ?? 1;
             $processingTime = now()->addHours($gracePeriodHours);
 
+            // Trigger n8n Feedback Workflow (FLOW 11)
+            $this->triggerFeedbackWorkflow($event);
+
             return response()->json([
                 'message' => 'Event ended successfully. Post-event processing scheduled.',
                 'event_id' => $event->id,
@@ -306,6 +379,141 @@ class EventController extends Controller
                 'message' => 'Failed to end event',
                 'error' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * Trigger massive invitations for an event with proximity filters.
+     */
+    public function sendEventInvitations(string $id, Request $request): JsonResponse
+    {
+        $event = Event::findOrFail($id);
+        
+        $webhookUrl = config('services.n8n.webhook_flow4_url');
+
+        if (!$webhookUrl) {
+            return response()->json(['success' => false, 'message' => 'n8n notification URL not configured'], 500);
+        }
+
+        try {
+            // Proclivity filters based on event's own data
+            $filters = [
+                'municipio' => $event->municipality,
+                'colonia' => $event->neighborhood,
+                'universe' => $event->target_universes,
+            ];
+
+            Http::post($webhookUrl, [
+                'message_type' => 'event_broadcast',
+                'event_id' => $event->id,
+                'campaign_id' => $event->campaign_id,
+                'filters' => $filters,
+                'api_base_url' => config('app.url') . '/api',
+                'timestamp' => now()->toIso8601String(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Broadcast triggered in n8n with proximity filters: ' . ($event->municipality ?: 'N/A')
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Event broadcast error: ' . $e->getMessage());
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Remove the specified event from storage.
+     */
+    public function destroy(string $id): JsonResponse
+    {
+        try {
+            $event = Event::findOrFail($id);
+            
+            // Optional: Check for existing attendees before deleting
+            // if ($event->attendees()->count() > 0) {
+            //     return response()->json(['message' => 'No se puede borrar un evento con asistentes registrados'], 400);
+            // }
+
+            // Delete associated QR codes or other dependencies if needed
+            // QrCode::where('event_id', $id)->delete();
+
+            $event->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Evento eliminado exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al eliminar el evento: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get attendees for events starting in approx 24 hours.
+     * Used by n8n FLOW 10 (Reminders).
+     */
+    public function getRemindersDue(): JsonResponse
+    {
+        $targetDate = now()->addDay()->format('Y-m-d');
+        
+        $events = Event::where('date', $targetDate)
+            ->where('status', 'scheduled')
+            ->with(['appointments.persona'])
+            ->get();
+
+        $reminders = [];
+        
+        foreach ($events as $event) {
+            foreach ($event->appointments as $appointment) {
+                if ($appointment->persona && $appointment->persona->numero_celular) {
+                    $reminders[] = [
+                        'whatsapp_number' => $appointment->persona->numero_celular,
+                        'nombre_ciudadano' => $appointment->persona->nombre,
+                        'nombre_evento' => $event->detail,
+                        'fecha_evento' => $event->date . ' ' . $event->time,
+                        'phone_number_id' => config('services.meta.phone_id') ?? '109489541525540'
+                    ];
+                }
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'attendees' => $reminders
+        ]);
+    }
+
+    /**
+     * Trigger n8n FLOW 11 for post-event feedback.
+     */
+    protected function triggerFeedbackWorkflow(Event $event)
+    {
+        $webhookUrl = config('services.n8n.webhook_flow11_feedback_url') ?? 'https://n8n.soymetrix.com/webhook/event-end-feedback-enterprise';
+
+        try {
+            // Load attendees that checked in
+            $attendees = $event->attendees()->whereNotNull('check_in_time')->with('persona')->get();
+
+            foreach ($attendees as $attendee) {
+                if ($attendee->persona && $attendee->persona->numero_celular) {
+                    \Illuminate\Support\Facades\Http::timeout(5)->post($webhookUrl, [
+                        'event_id' => $event->id,
+                        'nombre_evento' => $event->detail,
+                        'whatsapp_number' => $attendee->persona->numero_celular,
+                        'nombre_ciudadano' => $attendee->persona->nombre,
+                        'phone_number_id' => config('services.meta.phone_id') ?? '109489541525540'
+                    ]);
+                }
+            }
+
+            Log::info("FLOW 11 feedback reminders triggered for event {$event->id}");
+        } catch (\Exception $e) {
+            Log::error('Failed to trigger FLOW 11 feedback: ' . $e->getMessage());
         }
     }
 }

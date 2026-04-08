@@ -23,6 +23,7 @@ class EventRequest extends FormRequest
     {
         return [
             'campaign_id' => 'required|exists:campaigns,id',
+            'event_type_id' => 'nullable|exists:event_types,id',
             'detail' => 'required|string|max:255',
             'date' => 'required|date',
             'time' => 'nullable|date_format:H:i',
@@ -45,6 +46,10 @@ class EventRequest extends FormRequest
             'country' => 'nullable|string|max:255',
             'bonus_points_for_attendee' => 'required|integer|min:0',
             'bonus_points_for_leader' => 'required|integer|min:0',
+            'form_schema' => 'nullable|array',
+            'success_message' => 'nullable|string',
+            'slot_unit_name' => 'nullable|string|max:50',
+            'grace_period_hours' => 'nullable|integer|min:1|max:24',
         ];
     }
 

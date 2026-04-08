@@ -17,14 +17,19 @@ class WhatsAppSession extends Model
         'persona_id',
         'phone_number',
         'current_event_id',
+        'event_id',
         'conversation_state',
         'context_data',
+        'session_status',
+        'current_step',
+        'metadata',
         'last_message_at',
         'expires_at',
     ];
 
     protected $casts = [
         'context_data' => 'array',
+        'metadata' => 'array',
         'last_message_at' => 'datetime',
         'expires_at' => 'datetime',
     ];
@@ -35,6 +40,14 @@ class WhatsAppSession extends Model
     public function persona(): BelongsTo
     {
         return $this->belongsTo(Persona::class);
+    }
+
+    /**
+     * Get the current event associated with this session (Alias for controller)
+     */
+    public function event(): BelongsTo
+    {
+        return $this->belongsTo(Event::class, 'event_id');
     }
 
     /**

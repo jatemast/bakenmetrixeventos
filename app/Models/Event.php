@@ -3,11 +3,16 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 
 class Event extends Model
 {
+    use \App\Traits\BelongsToTenant;
+
     protected $fillable = [
+        'tenant_id',
         'campaign_id',
+        'event_type_id',
         'detail',
         'date',
         'time',
@@ -44,17 +49,34 @@ class Event extends Model
         'ended_at',
         'auto_close_scheduled',
         'points_distribution_scheduled',
+        'target_audience_filters',
+        'is_checkout_active',
+        'minimum_minutes_for_points',
+        'slot_unit_name',
+        'bonus_points_per_referral',
+        'form_schema',
+        'success_message',
     ];
 
     protected $casts = [
         'target_universes' => 'array',
+        'form_schema' => 'array',
         'ai_knowledge_ready' => 'boolean',
         'invitations_sent' => 'boolean',
         'points_distributed' => 'boolean',
         'auto_close_scheduled' => 'boolean',
         'points_distribution_scheduled' => 'boolean',
         'ended_at' => 'datetime',
+        'target_audience_filters' => 'array',
+        'is_checkout_active' => 'boolean',
+        'minimum_minutes_for_points' => 'integer',
+        'event_type_id' => 'integer',
     ];
+
+    public function eventType()
+    {
+        return $this->belongsTo(EventType::class, 'event_type_id');
+    }
 
     public function campaign()
     {
@@ -79,6 +101,16 @@ class Event extends Model
     public function repository()
     {
         return $this->hasOne(EventRepository::class);
+    }
+
+    public function slots()
+    {
+        return $this->hasMany(EventSlot::class);
+    }
+
+    public function appointments()
+    {
+        return $this->hasMany(Appointment::class);
     }
 
     /**

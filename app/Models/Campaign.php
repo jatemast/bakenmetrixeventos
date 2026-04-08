@@ -6,7 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class Campaign extends Model
 {
+    use \App\Traits\BelongsToTenant;
+
     protected $fillable = [
+        'tenant_id',
         'name',
         'theme',
         'objective',
@@ -26,10 +29,13 @@ class Campaign extends Model
         'number_of_events',
         'status',
         'created_by',
+        'form_schema',
+        'success_message',
     ];
 
     protected $casts = [
         'target_universes' => 'array',
+        'form_schema' => 'array',
         'start_date' => 'date',
         'end_date' => 'date',
     ];

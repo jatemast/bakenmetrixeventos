@@ -215,7 +215,16 @@ class CampaignController extends Controller
         $campaign = Campaign::findOrFail($id);
         
         // Get filter parameters from request
-        $universeFilter = $request->input('universe'); // Filter by specific universe
+        $universeFilter = $request->input('universe') ?: null;
+        $municipioFilter = ($request->input('municipio') ?: $request->input('territorio')) ?: null;
+        $coloniaFilter = $request->input('colonia') ?: null;
+        $seccionFilter = $request->input('seccion') ?: null;
+        $cdzFilter = $request->input('cdz') ?: null;
+        $searchFilter = $request->input('search') ?: null;
+        
+        $minAge = $request->input('min_age');
+        $maxAge = $request->input('max_age');
+        
         $includeAttendees = $request->boolean('include_attendees', true); // Include past attendees
         $limit = $request->input('limit'); // Optional limit
         $offset = $request->input('offset', 0); // Pagination offset
@@ -223,14 +232,100 @@ class CampaignController extends Controller
         // Start building query
         $query = Persona::query();
 
-        // Filter by target universes if campaign has them defined
+        // 0. Filter by EVENT proximity if no municipio filter provided
+        $eventId = $request->input('event_id');
+        $event = null;
+        if ($eventId) {
+            $event = \App\Models\Event::find($eventId);
+            if ($event && !$municipioFilter) {
+                // Default to event's territory for proximity
+                $municipioFilter = $event->municipality;
+            }
+        }
+
+        // 0.1 Filter by EVENT audience filters if event exists
+        if ($event && $event->target_audience_filters) {
+            $filters = is_string($event->target_audience_filters) 
+                ? json_decode($event->target_audience_filters, true) 
+                : $event->target_audience_filters;
+            
+            // 1.2 Filtro de Beneficiarios Genéricos (Pilar 1)
+            $hasBeneficiaries = $filters['has_beneficiaries'] ?? $filters['has_pets'] ?? false;
+            if ($hasBeneficiaries === true || $hasBeneficiaries === 'true') {
+                $query->where(function($q) {
+                    $q->whereHas('beneficiarios')
+                        ->orWhereHas('mascotas') // Legacy support
+                        ->orWhereJsonContains('universes', 'mascotas')
+                        ->orWhereJsonContains('tags', 'tiene_mascotas')
+                        ->orWhereJsonContains('tags', 'Dueño de Perro');
+                });
+            }
+            if (isset($filters['gender'])) {
+                $query->where('sexo', $filters['gender']);
+            }
+            if (!empty($minAge) || !empty($filters['min_age'])) {
+                $minAge = $minAge ?: $filters['min_age'];
+                $query->where('edad', '>=', $minAge);
+            }
+            if (!empty($maxAge) || !empty($filters['max_age'])) {
+                $maxAge = $maxAge ?: $filters['max_age'];
+                $query->where('edad', '<=', $maxAge);
+            }
+        }
+
+        // 1. Filter by target universes if campaign has them defined
         if ($campaign->target_universes && count($campaign->target_universes) > 0) {
             $query->whereIn('universe_type', $campaign->target_universes);
         }
 
-        // If specific universe requested, filter by it
+        // 2. If specific universe requested, filter by it (handle comma separated)
         if ($universeFilter) {
-            $query->where('universe_type', $universeFilter);
+            $universes = explode(',', $universeFilter);
+            $query->whereIn('universe_type', $universes);
+        }
+
+        // 3. Super Filter: Municipio/Territorio/Colonia
+        if ($municipioFilter) {
+            $query->where(function($q) use ($municipioFilter) {
+                $q->where('municipio', 'ilike', "%{$municipioFilter}%")
+                  ->orWhere('colonia', 'ilike', "%{$municipioFilter}%")
+                  ->orWhere('region', 'ilike', "%{$municipioFilter}%")
+                  ->orWhere('estado', 'ilike', "%{$municipioFilter}%");
+            });
+        }
+
+        // 4. Super Filter: Colonia
+        if ($coloniaFilter) {
+            $query->where('colonia', 'ilike', "%{$coloniaFilter}%");
+        }
+
+        // 5. Electoral Filter: Sección
+        if ($seccionFilter) {
+            $query->where('seccion', $seccionFilter);
+        }
+
+        // 6. Citizen Code Filter (CDZ)
+        if ($cdzFilter) {
+            $query->where('cdz_code', 'ilike', "%{$cdzFilter}%");
+        }
+
+        // 7. Age Range Filter
+        if ($minAge) {
+            $query->where('edad', '>=', $minAge);
+        }
+        if ($maxAge) {
+            $query->where('edad', '<=', $maxAge);
+        }
+
+        // 8. Search by Name / CDZ / CURP
+        if ($searchFilter) {
+            $query->where(function($q) use ($searchFilter) {
+                $q->where('nombre', 'ilike', "%{$searchFilter}%")
+                  ->orWhere('apellido_paterno', 'ilike', "%{$searchFilter}%")
+                  ->orWhere('cedula', 'ilike', "%{$searchFilter}%")
+                  ->orWhere('curp', 'ilike', "%{$searchFilter}%")
+                  ->orWhere('cdz_code', 'ilike', "%{$searchFilter}%");
+            });
         }
 
         // If include_attendees is true, also get personas from past event attendees
@@ -246,8 +341,17 @@ class CampaignController extends Controller
 
             if (!empty($attendeeIds)) {
                 // Union with attendees (if they match universe criteria)
-                $query->orWhereIn('id', $attendeeIds);
+                $query->orWhere(function($q) use ($attendeeIds) {
+                    $q->whereIn('id', $attendeeIds);
+                });
             }
+        }
+
+        // Optionally update last_invited_event_id for all these personas
+        if ($eventId && $request->boolean('update_invited')) {
+            // Clone the query to perform update without limit/offset
+            $updateQuery = clone $query;
+            $updateQuery->update(['last_invited_event_id' => $eventId]);
         }
 
         // Order by loyalty balance (prioritize engaged personas)
@@ -287,6 +391,17 @@ class CampaignController extends Controller
             return $persona;
         });
 
+        $debug = [
+            'sql' => $query->toSql(),
+            'bindings' => $query->getBindings(),
+            'municipioFilter' => $municipioFilter,
+            'campaign_target_universes' => $campaign->target_universes,
+            'count' => $query->count(),
+        ];
+        // Debug removido en producción — usar Log::debug() si es necesario
+        if (config('app.debug')) {
+            Log::debug('Personas query debug', $debug);
+        }
         return response()->json([
             'success' => true,
             'campaign' => [
@@ -432,5 +547,62 @@ class CampaignController extends Controller
             'success' => true,
             'data' => $distributionData
         ]);
+    }
+
+    /**
+     * Trigger a massive invitation broadcast for a campaign via n8n.
+     * This endpoint is called from the UI when the admin clicks "Send invitations to all".
+     * Triggers FLOW 7 – Invitaciones Masivas WhatsApp in n8n.
+     */
+    public function broadcastInvitations(string $id, Request $request): JsonResponse
+    {
+        $campaign = Campaign::with('events')->findOrFail($id);
+        
+        $webhookUrl = config('services.n8n.webhook_flow7_broadcast_url');
+
+        if (!$webhookUrl) {
+            return response()->json([
+                'success' => false,
+                'message' => 'n8n broadcast webhook URL not configured (FLOW 7)'
+            ], 500);
+        }
+
+        // Get the most recent/active event for this campaign
+        $activeEvent = $campaign->events()
+            ->where('status', '!=', 'completed')
+            ->orderBy('date', 'desc')
+            ->first();
+
+        try {
+            $response = \Illuminate\Support\Facades\Http::timeout(120)->post($webhookUrl, [
+                'message_type' => 'campaign_broadcast',
+                'campaign_id' => $campaign->id,
+                'event_id' => $request->input('event_id', $activeEvent?->id ?? ''),
+                'custom_message' => $request->input('custom_message', ''),
+                'filters' => [
+                    'municipio' => $request->input('municipio', ''),
+                    'colonia' => $request->input('colonia', ''),
+                    'universe' => $request->input('universe', ''),
+                ],
+                'api_base_url' => config('app.url') . '/api',
+                'timestamp' => now()->toIso8601String(),
+            ]);
+
+            $result = $response->json();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Broadcast masivo ejecutado via FLOW 7',
+                'broadcast_result' => $result,
+                'campaign_id' => $campaign->id,
+                'event_id' => $activeEvent?->id,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to trigger broadcast: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error triggering broadcast: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }
