@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Persona;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class PersonaController extends Controller
 {
@@ -12,53 +13,57 @@ class PersonaController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Persona::query();
+        $search = $request->get('search', '');
+        $cacheKey = 'personas_list_search_' . md5($search . serialize($request->all()));
 
-        // Búsqueda global (nombre, apellido paterno, apellido materno, número de celular, número de teléfono, ID)
-        if ($request->has('search')) {
-            $searchTerm = strtolower($request->search);
-            $query->where(function ($q) use ($searchTerm) {
-                $q->whereRaw('LOWER(nombre) LIKE ?', ['%' . $searchTerm . '%'])
-                  ->orWhereRaw('LOWER(apellido_paterno) LIKE ?', ['%' . $searchTerm . '%'])
-                  ->orWhereRaw('LOWER(apellido_materno) LIKE ?', ['%' . $searchTerm . '%'])
-                  ->orWhereRaw('LOWER(numero_celular) LIKE ?', ['%' . $searchTerm . '%'])
-                  ->orWhereRaw('LOWER(numero_telefono) LIKE ?', ['%' . $searchTerm . '%']);
-                // Si el término de búsqueda es numérico, también buscamos por ID
-                if (is_numeric($searchTerm)) {
-                    $q->orWhere('id', $searchTerm);
-                }
-            });
-        }
+        return \Illuminate\Support\Facades\Cache::remember($cacheKey, 600, function () use ($request) {
+            $query = Persona::query();
 
-        // Filtros específicos (pueden combinarse con la búsqueda global o usarse solos)
-        if ($request->has('nombre') && !$request->has('search')) {
-            $nombre = strtolower($request->nombre);
-            $query->whereRaw('LOWER(nombre) LIKE ?', ['%' . $nombre . '%']);
-        }
+            // Búsqueda global (nombre, apellido paterno, apellido materno, número de celular, número de teléfono, ID)
+            if ($request->has('search')) {
+                $searchTerm = strtolower($request->search);
+                $query->where(function ($q) use ($searchTerm) {
+                    $q->whereRaw('LOWER(nombre) LIKE ?', ['%' . $searchTerm . '%'])
+                      ->orWhereRaw('LOWER(apellido_paterno) LIKE ?', ['%' . $searchTerm . '%'])
+                      ->orWhereRaw('LOWER(apellido_materno) LIKE ?', ['%' . $searchTerm . '%'])
+                      ->orWhereRaw('LOWER(numero_celular) LIKE ?', ['%' . $searchTerm . '%'])
+                      ->orWhereRaw('LOWER(numero_telefono) LIKE ?', ['%' . $searchTerm . '%']);
+                    // Si el término de búsqueda es numérico, también buscamos por ID
+                    if (is_numeric($searchTerm)) {
+                        $q->orWhere('id', $searchTerm);
+                    }
+                });
+            }
 
-        if ($request->has('apellido_paterno') && !$request->has('search')) {
-            $apellidoPaterno = strtolower($request->apellido_paterno);
-            $query->whereRaw('LOWER(apellido_paterno) LIKE ?', ['%' . $apellidoPaterno . '%']);
-        }
+            // Filtros específicos (pueden combinarse con la búsqueda global o usarse solos)
+            if ($request->has('nombre') && !$request->has('search')) {
+                $nombre = strtolower($request->nombre);
+                $query->whereRaw('LOWER(nombre) LIKE ?', ['%' . $nombre . '%']);
+            }
 
-        if ($request->has('apellido_materno') && !$request->has('search')) {
-            $apellidoMaterno = strtolower($request->apellido_materno);
-            $query->whereRaw('LOWER(apellido_materno) LIKE ?', ['%' . $apellidoMaterno . '%']);
-        }
+            if ($request->has('apellido_paterno') && !$request->has('search')) {
+                $apellidoPaterno = strtolower($request->apellido_paterno);
+                $query->whereRaw('LOWER(apellido_paterno) LIKE ?', ['%' . $apellidoPaterno . '%']);
+            }
 
-        if ($request->has('numero_celular') && !$request->has('search')) {
-            $numeroCelular = strtolower($request->numero_celular);
-            $query->whereRaw('LOWER(numero_celular) LIKE ?', ['%' . $numeroCelular . '%']);
-        }
+            if ($request->has('apellido_materno') && !$request->has('search')) {
+                $apellidoMaterno = strtolower($request->apellido_materno);
+                $query->whereRaw('LOWER(apellido_materno) LIKE ?', ['%' . $apellidoMaterno . '%']);
+            }
 
-        if ($request->has('numero_telefono') && !$request->has('search')) {
-            $numeroTelefono = strtolower($request->numero_telefono);
-            $query->whereRaw('LOWER(numero_telefono) LIKE ?', ['%' . $numeroTelefono . '%']);
-        }
+            if ($request->has('numero_celular') && !$request->has('search')) {
+                $numeroCelular = strtolower($request->numero_celular);
+                $query->whereRaw('LOWER(numero_celular) LIKE ?', ['%' . $numeroCelular . '%']);
+            }
 
-        $personas = $query->get();
+            if ($request->has('numero_telefono') && !$request->has('search')) {
+                $numeroTelefono = strtolower($request->numero_telefono);
+                $query->whereRaw('LOWER(numero_telefono) LIKE ?', ['%' . $numeroTelefono . '%']);
+            }
 
-        return response()->json($personas);
+            $personas = $query->get();
+            return response()->json($personas);
+        });
     }
 
     /**
@@ -71,11 +76,13 @@ class PersonaController extends Controller
         try {
             $validatedData = $request->validate([
                 'cedula' => 'required|string|max:255|unique:personas,cedula',
+                'curp' => 'nullable|string|max:18',
+                'clave_elector' => 'nullable|string|max:18',
                 'nombre' => 'required|string|max:255',
                 'apellido_paterno' => 'required|string|max:255',
                 'apellido_materno' => 'required|string|max:255',
                 'edad' => 'required|integer|min:0',
-                'sexo' => 'required|in:H,M',
+                'sexo' => 'required|in:H,M,O',
                 'calle' => 'required|string|max:255',
                 'numero_exterior' => 'required|string|max:255',
                 'numero_interior' => 'nullable|string|max:255',
@@ -85,12 +92,39 @@ class PersonaController extends Controller
                 'estado' => 'required|string|max:255',
                 'numero_celular' => 'nullable|string|max:20',
                 'numero_telefono' => 'nullable|string|max:20',
+                'tags' => 'nullable|array',
+                'universes' => 'nullable|array',
+                'latitude' => 'nullable|numeric',
+                'longitude' => 'nullable|numeric',
             ]);
+
+            // Normalizar celular si viene
+            if (!empty($validatedData['numero_celular'])) {
+                $validatedData['numero_celular'] = $this->normalizePhoneNumber($validatedData['numero_celular']);
+                $validatedData['numero_telefono'] = $validatedData['numero_celular'];
+            }
 
             \Log::info('Datos validados para Persona:', $validatedData);
 
             $persona = Persona::create($validatedData);
+            
+            // Actualizar Geo (PostGIS) si hay coordenadas
+            if (!empty($validatedData['latitude']) && !empty($validatedData['longitude'])) {
+                $lat = $validatedData['latitude'];
+                $lng = $validatedData['longitude'];
+                
+                DB::table('personas')
+                    ->where('id', $persona->id)
+                    ->update([
+                        'location' => DB::raw("ST_SetSRID(ST_MakePoint($lng, $lat), 4326)")
+                    ]);
+            }
+
             \Log::info('Persona creada exitosamente:', ['id' => $persona->id]);
+
+            // Invalidad Cache
+            \Illuminate\Support\Facades\Cache::flush(); 
+
             return response()->json($persona, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             \Log::error('Error de validación al crear Persona:', ['errors' => $e->errors(), 'request' => $request->all()]);
@@ -115,11 +149,14 @@ class PersonaController extends Controller
     public function update(Request $request, Persona $persona)
     {
         $validatedData = $request->validate([
+            'cedula' => 'sometimes|required|string|max:255|unique:personas,cedula,' . $persona->id,
+            'curp' => 'nullable|string|max:18',
+            'clave_elector' => 'nullable|string|max:18',
             'nombre' => 'sometimes|required|string|max:255',
             'apellido_paterno' => 'sometimes|required|string|max:255',
             'apellido_materno' => 'sometimes|required|string|max:255',
             'edad' => 'sometimes|required|integer|min:0',
-            'sexo' => 'sometimes|required|in:H,M',
+            'sexo' => 'sometimes|required|in:H,M,O',
             'calle' => 'sometimes|required|string|max:255',
             'numero_exterior' => 'sometimes|required|string|max:255',
             'numero_interior' => 'nullable|string|max:255',
@@ -129,9 +166,34 @@ class PersonaController extends Controller
             'estado' => 'sometimes|required|string|max:255',
             'numero_celular' => 'nullable|string|max:20',
             'numero_telefono' => 'nullable|string|max:20',
+            'tags' => 'nullable|array',
+            'universes' => 'nullable|array',
+            'latitude' => 'nullable|numeric',
+            'longitude' => 'nullable|numeric',
         ]);
 
+        if (!empty($validatedData['numero_celular'])) {
+            $validatedData['numero_celular'] = $this->normalizePhoneNumber($validatedData['numero_celular']);
+            $validatedData['numero_telefono'] = $validatedData['numero_celular'];
+        }
+
         $persona->update($validatedData);
+
+        // Invalidate Cache
+        \Illuminate\Support\Facades\Cache::flush();
+
+        // Actualizar Geo (PostGIS) si hay coordenadas
+        if (!empty($validatedData['latitude']) && !empty($validatedData['longitude'])) {
+            $lat = $validatedData['latitude'];
+            $lng = $validatedData['longitude'];
+            
+            DB::table('personas')
+                ->where('id', $persona->id)
+                ->update([
+                    'location' => DB::raw("ST_SetSRID(ST_MakePoint($lng, $lat), 4326)")
+                ]);
+        }
+
         return response()->json($persona);
     }
 
@@ -141,6 +203,7 @@ class PersonaController extends Controller
     public function destroy(Persona $persona)
     {
         $persona->delete();
+        \Illuminate\Support\Facades\Cache::flush();
         return response()->json(null, 204);
     }
 
@@ -158,5 +221,18 @@ class PersonaController extends Controller
             'current_balance' => $balance,
             'history' => $history
         ]);
+    /**
+     * Normalize phone number format
+     */
+    private function normalizePhoneNumber($phone)
+    {
+        $phone = preg_replace('/[^0-9]/', '', $phone);
+        if (strlen($phone) > 15) {
+            $phone = substr($phone, 0, 12);
+        }
+        if (strlen($phone) == 10) {
+            $phone = '52' . $phone;
+        }
+        return $phone;
     }
 }

@@ -401,6 +401,17 @@
 
                     <div class="row">
                         <div class="input-group">
+                            <label>Num. Exterior <span class="required">*</span></label>
+                            <input type="text" id="numero_exterior" placeholder="Ej: 123" required>
+                        </div>
+                        <div class="input-group">
+                            <label>Num. Interior</label>
+                            <input type="text" id="numero_interior" placeholder="Ej: 4B">
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="input-group">
                             <label>Municipio</label>
                             <input type="text" id="municipio" placeholder="Ej: Soledad" readonly>
                         </div>
@@ -772,6 +783,8 @@
                 sexo: document.getElementById('sexo').value,
                 email: document.getElementById('email').value || null,
                 calle: document.getElementById('calle').value || '',
+                numero_exterior: document.getElementById('numero_exterior').value || '',
+                numero_interior: document.getElementById('numero_interior').value || '',
                 colonia: document.getElementById('colonia').value || '',
                 codigo_postal: document.getElementById('codigo_postal').value || '',
                 municipio: document.getElementById('municipio').value || '',
