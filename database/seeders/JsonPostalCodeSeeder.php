@@ -26,31 +26,31 @@ class JsonPostalCodeSeeder extends Seeder
         $total = count($dataRecords);
         $this->command->info("Importing $total CPs from JSON...");
 
-        // Start fresh
         PostalCode::truncate();
 
-        DB::beginTransaction();
-        try {
-            $count = 0;
-            foreach ($dataRecords as $item) {
-                PostalCode::create([
-                    'entidad_id' => $item['CVE_ENT'] ?? null,
-                    'estado' => $item['NOM_ENT'] ?? '',
-                    'municipio_id' => $item['CU_MUN'] ?? null,
-                    'municipio' => $item['NOM_MUN'] ?? '',
-                    'colonia' => $item['NOM_COL'] ?? '',
-                    'cp' => (string)($item['C_P'] ?? '')
-                ]);
+        $chunks = array_chunk($dataRecords, 1000);
+        $this->command->info("Starting bulk import in chunks of 1000...");
 
-                $count++;
-                if ($count % 500 == 0) {
-                    $this->command->info("Imported $count / $total records...");
+        try {
+            foreach ($chunks as $index => $chunk) {
+                $batch = [];
+                foreach ($chunk as $item) {
+                    $batch[] = [
+                        'entidad_id' => $item['CVE_ENT'] ?? null,
+                        'estado' => $item['NOM_ENT'] ?? '',
+                        'municipio_id' => $item['CU_MUN'] ?? null,
+                        'municipio' => $item['NOM_MUN'] ?? '',
+                        'colonia' => $item['NOM_COL'] ?? '',
+                        'cp' => (string)($item['C_P'] ?? ''),
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
                 }
+                DB::table('postal_codes')->insert($batch);
+                $this->command->info("Imported chunk " . ($index + 1) . "/" . count($chunks));
             }
-            DB::commit();
-            $this->command->info("Done! Imported $count total records.");
+            $this->command->info("Done! Imported all records.");
         } catch (\Exception $e) {
-            DB::rollBack();
             $this->command->error("Import error: " . $e->getMessage());
         }
     }
