@@ -97,6 +97,8 @@ class EventController extends Controller
             // Trigger n8n Invitation Workflow
             $this->triggerN8nWorkflow($event);
 
+            \Illuminate\Support\Facades\Cache::flush();
+
             return response()->json([
                 'message' => 'Evento creado exitosamente con códigos QR',
                 'data' => $event->load('qrCodes')
@@ -211,6 +213,7 @@ class EventController extends Controller
         }
 
         $event->update($data);
+        \Illuminate\Support\Facades\Cache::flush();
 
         return response()->json([
             'message' => 'Evento actualizado exitosamente',
@@ -223,10 +226,12 @@ class EventController extends Controller
      */
     public function allEvents(): JsonResponse
     {
-        $events = Event::with('campaign')->get();
-        return response()->json([
-            'events' => $events
-        ]);
+        return \Illuminate\Support\Facades\Cache::remember('events_all', 600, function () {
+            $events = Event::with('campaign')->get();
+            return response()->json([
+                'events' => $events
+            ]);
+        });
     }
 
     /**
@@ -234,12 +239,14 @@ class EventController extends Controller
      */
     public function index(string $campaignId): JsonResponse
     {
-        $campaign = Campaign::findOrFail($campaignId);
-        $events = $campaign->events()->get();
+        return \Illuminate\Support\Facades\Cache::remember("events_campaign_{$campaignId}", 600, function () use ($campaignId) {
+            $campaign = Campaign::findOrFail($campaignId);
+            $events = $campaign->events()->get();
 
-        return response()->json([
-            'events' => $events
-        ]);
+            return response()->json([
+                'events' => $events
+            ]);
+        });
     }
 
     /**
@@ -440,6 +447,7 @@ class EventController extends Controller
             // QrCode::where('event_id', $id)->delete();
 
             $event->delete();
+            \Illuminate\Support\Facades\Cache::flush();
 
             return response()->json([
                 'success' => true,

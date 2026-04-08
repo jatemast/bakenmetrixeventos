@@ -589,39 +589,43 @@ class PublicRegistrationController extends Controller
             return response()->json(['success' => false, 'message' => 'Event or Persona not found'], 404);
         }
 
-        $eventName = $event->nombre;
-        $eventTopic = $event->detail;
-        $eventLocation = $event->ubicacion ?? ($event->calle . ', ' . $event->colonia);
-        
-        $petList = $persona->mascotas->map(fn($p) => "{$p->nombre} ({$p->tipo})")->join(', ');
+        $cacheKey = "ai_config_{$eventId}_{$personaId}";
 
-        $unitLabel = $event->slot_unit_name ?? 'mesa';
+        return \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function () use ($event, $persona, $eventId, $personaId) {
+            $eventName = $event->nombre;
+            $eventTopic = $event->detail;
+            $eventLocation = $event->ubicacion ?? ($event->calle . ', ' . $event->colonia);
+            
+            $petList = $persona->mascotas->map(fn($p) => "{$p->nombre} ({$p->tipo})")->join(', ');
 
-        $prompt = "Eres MetrixBot, el asistente de IA VIP para el sistema de eventos de la Municipalidad. 🚀\n\n"
-                . "--- CONTEXTO DEL EVENTO ---\n"
-                . "NOMBRE: {$eventName}\n"
-                . "TEMÁTICA: {$eventTopic}\n"
-                . "UBICACIÓN: {$eventLocation}\n"
-                . "--- DATOS DEL CIUDADANO ---\n"
-                . "NOMBRE: {$persona->nombre} {$persona->apellido_paterno}\n"
-                . "UNIVERSO: {$persona->universe_type}\n"
-                . ($petList ? "MASCOTAS: {$petList}\n" : "NO TIENE MASCOTAS REGISTRADAS.\n")
-                . "----------------------------\n\n"
-                . "REGLAS DE ORO:\n"
-                . "1. Sé conciso, amable y usa emojis.\n"
-                . "2. Tu objetivo principal es ayudar al ciudadano a agendar una cita para este evento específico.\n"
-                . "3. Si el ciudadano pregunta por los puntos, dile que ganará " . ($event->bonus_points_for_attendee ?? 5) . " PUNTOS por su asistencia completa.\n"
-                . "4. Pregúntale a quién de sus mascotas traerá si el evento es de bienestar animal.\n"
-                . "5. Informa que se le asignará una {$unitLabel} para su atención.\n"
-                . "6. Consulta siempre los horarios disponibles usando la herramienta slots antes de prometer una hora.\n\n"
-                . "TONO: VIP, profesional y servicial.";
+            $unitLabel = $event->slot_unit_name ?? 'mesa';
 
-        return response()->json([
-            'success' => true,
-            'master_prompt' => $prompt,
-            'event_id' => $event->id,
-            'persona_id' => $persona->id
-        ]);
+            $prompt = "Eres MetrixBot, el asistente de IA VIP para el sistema de eventos de la Municipalidad. 🚀\n\n"
+                    . "--- CONTEXTO DEL EVENTO ---\n"
+                    . "NOMBRE: {$eventName}\n"
+                    . "TEMÁTICA: {$eventTopic}\n"
+                    . "UBICACIÓN: {$eventLocation}\n"
+                    . "--- DATOS DEL CIUDADANO ---\n"
+                    . "NOMBRE: {$persona->nombre} {$persona->apellido_paterno}\n"
+                    . "UNIVERSO: {$persona->universe_type}\n"
+                    . ($petList ? "MASCOTAS: {$petList}\n" : "NO TIENE MASCOTAS REGISTRADAS.\n")
+                    . "----------------------------\n\n"
+                    . "REGLAS DE ORO:\n"
+                    . "1. Sé conciso, amable y usa emojis.\n"
+                    . "2. Tu objetivo principal es ayudar al ciudadano a agendar una cita para este evento específico.\n"
+                    . "3. Si el ciudadano pregunta por los puntos, dile que ganará " . ($event->bonus_points_for_attendee ?? 5) . " PUNTOS por su asistencia completa.\n"
+                    . "4. Pregúntale a quién de sus mascotas traerá si el evento es de bienestar animal.\n"
+                    . "5. Informa que se le asignará una {$unitLabel} para su atención.\n"
+                    . "6. Consulta siempre los horarios disponibles usando la herramienta slots antes de prometer una hora.\n\n"
+                    . "TONO: VIP, profesional y servicial.";
+
+            return response()->json([
+                'success' => true,
+                'master_prompt' => $prompt,
+                'event_id' => $eventId,
+                'persona_id' => $personaId
+            ]);
+        });
     }
 
     /**

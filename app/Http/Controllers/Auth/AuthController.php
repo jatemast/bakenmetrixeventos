@@ -67,8 +67,11 @@ class AuthController extends Controller
     {
         \Illuminate\Support\Facades\Log::info('Login Attempt for: ' . $request->email);
 
-        // Bypass global tenant scope to find the user row during login
-        $user = User::withoutGlobalScopes()->where('email', $request->email)->first();
+        // Caching user lookup for faster login (30 seconds)
+        $cacheKey = 'user_login_' . md5($request->email);
+        $user = \Illuminate\Support\Facades\Cache::remember($cacheKey, 30, function () use ($request) {
+            return User::withoutGlobalScopes()->where('email', $request->email)->first();
+        });
 
         if (!$user) {
             \Illuminate\Support\Facades\Log::warning('Login Failed: User not found for ' . $request->email);
