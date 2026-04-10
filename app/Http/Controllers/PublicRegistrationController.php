@@ -572,6 +572,15 @@ class PublicRegistrationController extends Controller
         // 2. Check for PENDING invitation
         if ($persona->last_invited_event_id && $isSiResponse) {
             $event = \App\Models\Event::find($persona->last_invited_event_id);
+
+            // AUTO-PILOT: If the invited event was deleted, pick the most recent active event automatically
+            if (!$event) {
+                $event = \App\Models\Event::where('status', 'active')
+                    ->where('date', '>=', now()->format('Y-m-d'))
+                    ->orderBy('id', 'desc')
+                    ->first();
+            }
+
             if ($event && $event->status !== 'completed' && !\Carbon\Carbon::parse($event->date)->endOfDay()->isPast()) {
                 // Initialize interaction session
                 $persona->update([
@@ -600,18 +609,27 @@ class PublicRegistrationController extends Controller
      */
     public function getAIConfig(Request $request)
     {
-        $eventId = $request->input('event_id');
-        $personaId = $request->input('persona_id');
+        // Sanitation: Strip any non-numeric characters (like dashes '-' found in n8n nodes)
+        $eventId = preg_replace('/[^0-9]/', '', (string)$request->input('event_id'));
+        $personaId = preg_replace('/[^0-9]/', '', (string)$request->input('persona_id'));
 
-        // Super Rescue Mode: If ID is a string (like "Asistir"), look up the persona's recent context
-        if ($eventId && !is_numeric($eventId)) {
+        // Ultra Rescue Mode: Ensure we find an event context no matter what
+        if (!$eventId || !is_numeric($eventId)) {
             $persona = Persona::find($personaId);
             if ($persona) {
                 $eventId = $persona->last_interacted_event_id ?? $persona->last_invited_event_id;
             }
+            
+            // Last resort: If still no ID, find the most relevant upcoming/active event
+            if (!$eventId) {
+                $eventId = \App\Models\Event::where('status', 'active')
+                    ->where('date', '>=', now()->format('Y-m-d'))
+                    ->orderBy('date', 'asc')
+                    ->value('id');
+            }
         }
 
-        // Final sanitation: Ensure we have a numeric ID or null
+        // Final sanitation
         $eventId = is_numeric($eventId) ? (int)$eventId : null;
 
         if (!$eventId) {
