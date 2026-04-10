@@ -603,6 +603,24 @@ class PublicRegistrationController extends Controller
         $eventId = $request->input('event_id');
         $personaId = $request->input('persona_id');
 
+        // Super Rescue Mode: If ID is a string (like "Asistir"), look up the persona's recent context
+        if ($eventId && !is_numeric($eventId)) {
+            $persona = Persona::find($personaId);
+            if ($persona) {
+                $eventId = $persona->last_interacted_event_id ?? $persona->last_invited_event_id;
+            }
+        }
+
+        // Final sanitation: Ensure we have a numeric ID or null
+        $eventId = is_numeric($eventId) ? (int)$eventId : null;
+
+        if (!$eventId) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Missing or invalid event_id'
+            ], 400);
+        }
+
         $event = \App\Models\Event::find($eventId);
         $persona = Persona::with('mascotas')->find($personaId);
 

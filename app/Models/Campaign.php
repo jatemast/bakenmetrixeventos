@@ -42,7 +42,16 @@ class Campaign extends Model
 
     public function events()
     {
-        return $this->belongsToMany(Event::class, 'campaign_event');
+        return $this->hasMany(Event::class);
+    }
+
+    protected static function boot()
+    {
+        parent::boot();
+        
+        static::deleting(function ($campaign) {
+            $campaign->events()->delete();
+        });
     }
 
     public function creator()
