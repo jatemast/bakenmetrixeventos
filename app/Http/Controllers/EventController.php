@@ -45,12 +45,6 @@ class EventController extends Controller
 
             $event = Event::create($data);
 
-            // Attach event to campaign
-            if (isset($data['campaign_id'])) {
-                $campaign = Campaign::findOrFail($data['campaign_id']);
-                $campaign->events()->attach($event->id);
-            }
-
             // Auto-generate QR codes for the event
             $generatedQrs = $this->qrCodeService->generateEventQrCodes($event);
 
