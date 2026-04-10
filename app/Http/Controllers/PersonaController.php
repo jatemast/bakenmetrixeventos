@@ -221,6 +221,8 @@ class PersonaController extends Controller
             'current_balance' => $balance,
             'history' => $history
         ]);
+    }
+
     /**
      * Normalize phone number format
      */
