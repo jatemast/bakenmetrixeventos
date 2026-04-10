@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Event;
 use App\Models\Persona;
 use App\Models\User;
+use App\Services\WhatsAppNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
@@ -239,7 +240,12 @@ class PublicRegistrationController extends Controller
             }
 
             // Trigger WhatsApp welcome message via n8n FLOW 4
-            $this->sendRegistrationConfirmation($persona);
+            try {
+                $whatsappService = app(WhatsAppNotificationService::class);
+                $whatsappService->sendWelcomeMessage($persona);
+            } catch (\Exception $e) {
+                Log::warning('Could not trigger WhatsApp welcome: ' . $e->getMessage());
+            }
 
             return response()->json([
                 'success' => true,
@@ -270,36 +276,6 @@ class PublicRegistrationController extends Controller
         }
     }
 
-    /**
-     * Send registration confirmation via WhatsApp (n8n FLOW 4)
-     */
-    private function sendRegistrationConfirmation(Persona $persona): void
-    {
-        $webhookUrl = config('services.n8n.webhook_flow4_url') ?? 'https://n8n.soymetrix.com/webhook/enviar-mensaje';
-        $metaToken = config('services.meta.token');
-        $metaPhoneId = config('services.meta.phone_id');
-
-        try {
-            Http::timeout(10)->post($webhookUrl, [
-                'token' => $metaToken,
-                'phone_number_id' => $metaPhoneId,
-                'destinatario' => $persona->numero_celular,
-                'tipo' => 'text',
-                'mensaje' => "🎉 *¡Bienvenido a METRIX, {$persona->nombre}!*\n\n"
-                    . "Tu registro en nuestro CRM ha sido exitoso.\n\n"
-                    . "📋 *Datos registrados:*\n"
-                    . "• Nombre: {$persona->nombre} {$persona->apellido_paterno}\n"
-                    . "• Cédula: {$persona->cedula}\n"
-                    . "• WhatsApp: {$persona->numero_celular}\n\n"
-                    . "🏆 Ahora puedes acumular puntos asistiendo a nuestros eventos.\n\n"
-                    . "¡Gracias por registrarte!",
-            ]);
-
-            Log::info("Registration confirmation sent to {$persona->numero_celular}");
-        } catch (\Exception $e) {
-            Log::error("Failed to send registration confirmation: " . $e->getMessage());
-        }
-    }
 
     /**
      * Register for event via invitation

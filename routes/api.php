@@ -20,6 +20,7 @@ use App\Http\Controllers\QrImageController;
 use App\Http\Controllers\UserPortalController;
 use App\Http\Controllers\EventSlotController;
 use App\Http\Controllers\MetricsController;
+use App\Http\Controllers\EventTypeController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Log;
@@ -57,6 +58,19 @@ Route::prefix('metrics')->group(function () {
     
     // Monitoring
     Route::get('/monitoring/n8n', [\App\Http\Controllers\MonitoringController::class, 'n8nStatus']);
+    Route::get('/monitoring/whatsapp-config', function() {
+        $token = config('services.meta.token') ?? env('META_WHATSAPP_TOKEN');
+        $phoneId = config('services.meta.phone_id') ?? env('META_WHATSAPP_PHONE_ID');
+        $n8nUrl = config('services.n8n.webhook_flow4_url') ?? env('N8N_FLOW4_WEBHOOK_URL');
+        
+        return response()->json([
+            'token_present' => !empty($token),
+            'token_preview' => $token ? (substr($token, 0, 10) . '...') : 'MISSING',
+            'phone_id' => $phoneId ?? 'MISSING',
+            'n8n_url' => $n8nUrl ?? 'MISSING',
+            'config_cache_active' => file_exists(base_path('bootstrap/cache/config.php'))
+        ]);
+    });
     Route::get('/nightly-report', [MetricsController::class, 'nightlyReport']);
 
     // Territories
@@ -243,3 +257,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
 // Personas Routes (public)
 Route::apiResource('personas', PersonaController::class);
+
+// Event Types (public for form building)
+Route::get('/event-types', [EventTypeController::class, 'index']);

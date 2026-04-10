@@ -106,34 +106,95 @@ class WhatsAppNotificationService
     }
 
     /**
-     * Envía WhatsApp de bienvenida cuando son censados/registrados por primera vez en la PWA
+     * Send welcome message to a newly registered user
+     */
+    public function sendWelcomeMessage($persona): bool
+    {
+        [$metaToken, $metaPhoneId] = $this->getMetaCredentials();
+        $n8nUrl = config('services.n8n.webhook_flow4_url') ?? 'https://n8n.soymetrix.com/webhook/enviar-invitacion';
+        
+        $destinatario = $persona->numero_celular;
+        $nombre = $persona->nombre;
+
+        $payload = [
+            'token' => $metaToken,
+            'phone_number_id' => $metaPhoneId,
+            'destinatario' => $destinatario,
+            'tipo' => 'text',
+            'mensaje' => "🎉 *¡Bienvenido a METRIX, {$nombre}!*\n\n"
+                . "Tu registro en nuestro CRM ha sido exitoso.\n\n"
+                . "📋 *Datos registrados:*\n"
+                . "• Nombre: {$nombre} {$persona->apellido_paterno}\n"
+                . "• Cédula: " . ($persona->cedula ?? 'Pendiente') . "\n"
+                . "• WhatsApp: {$destinatario}\n\n"
+                . "🏆 Ahora puedes acumular puntos asistiendo a nuestros eventos.\n\n"
+                . "¡Gracias por registrarte!",
+        ];
+
+        try {
+            Log::info("Sending registration welcome to {$destinatario} via n8n", ['url' => $n8nUrl, 'phone_id' => $metaPhoneId]);
+            $response = Http::timeout(10)->post($n8nUrl, $payload);
+            
+            if ($response->failed()) {
+                Log::error("n8n welcome webhook failed: " . $response->body());
+                return false;
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error("Error triggering welcome webhook: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get Meta credentials with multiple fallback mechanisms
+     */
+    private function getMetaCredentials(): array
+    {
+        $token = config('services.meta.token') ?? env('META_WHATSAPP_TOKEN');
+        $phoneId = config('services.meta.phone_id') ?? env('META_WHATSAPP_PHONE_ID');
+
+        if (!$token || !$phoneId) {
+            Log::warning('Meta WhatsApp credentials missing in both config and env.');
+        }
+
+        return [$token, $phoneId];
+    }
+
+    /**
+     * Send general greeting to a new citizen (Censo)
      */
     public function sendGreetingNewCitizen($persona): bool
     {
-        if (!$persona->numero_celular) {
-            return false;
-        }
+        [$metaToken, $metaPhoneId] = $this->getMetaCredentials();
+        $n8nUrl = config('services.n8n.webhook_flow4_url') ?? 'https://n8n.soymetrix.com/webhook/enviar-invitacion';
+        
+        $destinatario = $persona->numero_celular;
+        $nombre = $persona->nombre;
+
+        $payload = [
+            'token' => $metaToken,
+            'phone_number_id' => $metaPhoneId,
+            'destinatario' => $destinatario,
+            'tipo' => 'text',
+            'mensaje' => "👋 ¡Hola, *{$nombre}*!\n\n"
+                . "Has sido censado(a) y ya formas parte de nuestra red.\n"
+                . "A través de este canal recibirás invitaciones a eventos cerca de tu territorio según tus intereses. 🚀",
+        ];
 
         try {
-            $n8nUrl = config('services.n8n.webhook_flow4_url') ?? 'https://n8n.soymetrix.com/webhook/enviar-mensaje';
-            $metaToken = config('services.meta.token');
-            $metaPhoneId = config('services.meta.phone_id');
+            Log::info("Sending greeting to {$destinatario} via n8n", ['url' => $n8nUrl, 'phone_id' => $metaPhoneId]);
+            $response = Http::timeout(10)->post($n8nUrl, $payload);
+            
+            if ($response->failed()) {
+                Log::error("n8n greeting webhooks failed: " . $response->body());
+                return false;
+            }
 
-            $payload = [
-                'token' => $metaToken,
-                'phone_number_id' => $metaPhoneId,
-                'destinatario' => $persona->numero_celular,
-                'tipo' => 'text',
-                'mensaje' => "👋 ¡Hola, *{$persona->nombre}*!\n\n"
-                    . "Has sido censado(a) y ya formas parte de nuestra red.\n"
-                    . "A través de este canal recibirás invitaciones a eventos cerca de tu territorio según tus intereses. 🚀"
-            ];
-
-            $response = Http::post($n8nUrl, $payload);
-            return $response->successful();
-
+            return true;
         } catch (\Exception $e) {
-            Log::error("Fallo enviando bienvenida a ciudadano: " . $e->getMessage());
+            Log::error("Error triggering greeting webhook: " . $e->getMessage());
             return false;
         }
     }
