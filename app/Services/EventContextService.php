@@ -220,6 +220,7 @@ class EventContextService
      */
     private function getActiveEventsForPersona(Persona $persona): Collection
     {
+        // 1. Get events where persona is attendee (explicitly registered/scanned)
         $events = EventAttendee::where('persona_id', $persona->id)
             ->whereHas('event', function($query) {
                 $query->where('date', '>=', now()->subDay()) // Events from yesterday onwards
@@ -229,6 +230,34 @@ class EventContextService
             ->get()
             ->pluck('event')
             ->filter(); // Remove nulls
+
+        // 2. Fallback: Add last invited event if not already in the list
+        if ($persona->last_invited_event_id) {
+            $invitedEvent = Event::find($persona->last_invited_event_id);
+            if ($invitedEvent && !$events->contains('id', $invitedEvent->id)) {
+                $events->push($invitedEvent);
+            }
+        }
+
+        // 3. Fallback: Add last interacted event if not already in the list
+        if ($persona->last_interacted_event_id) {
+            $interactedEvent = Event::find($persona->last_interacted_event_id);
+            if ($interactedEvent && !$events->contains('id', $interactedEvent->id)) {
+                $events->push($interactedEvent);
+            }
+        }
+
+        // 4. Final Fallback: If still empty, grab the latest active event from the system
+        if ($events->isEmpty()) {
+            $latestEvent = Event::where('status', 'active')
+                ->where('date', '>=', now()->format('Y-m-d'))
+                ->orderBy('id', 'desc')
+                ->first();
+            
+            if ($latestEvent) {
+                $events->push($latestEvent);
+            }
+        }
 
         // Sort by priority (today > this week > future)
         return $events->sortByDesc(function($event) {
