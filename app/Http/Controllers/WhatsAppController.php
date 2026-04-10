@@ -97,6 +97,24 @@ class WhatsAppController extends Controller
     }
 
     /**
+     * Resolve event context from message or history (Used by n8n)
+     */
+    public function resolveEventContext(Request $request): JsonResponse
+    {
+        $request->validate([
+            'whatsapp' => 'required|string',
+            'text' => 'nullable|string'
+        ]);
+
+        $context = $this->eventContextService->resolveEventContext(
+            $request->whatsapp, 
+            $request->text
+        );
+
+        return response()->json($context);
+    }
+
+    /**
      * Get active events for a persona via WhatsApp number
      */
     public function getActiveEvents(Request $request): JsonResponse
