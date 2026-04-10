@@ -71,6 +71,10 @@ class PublicRegistrationController extends Controller
     public function register(Request $request)
     {
         $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'last_name' => 'required|string|max:255',
+            'maternal_name' => 'nullable|string|max:255',
+            'whatsapp_number' => 'required|string',
             'curp' => 'required|string|max:18',
             'clave_elector' => 'nullable|string|max:18',
             'seccion' => 'nullable|string|max:10',
@@ -93,6 +97,7 @@ class PublicRegistrationController extends Controller
             'emergency_contact' => 'nullable|string|max:255',
             'emergency_phone' => 'nullable|string|max:20',
             'leader_id' => 'nullable|exists:personas,id',
+            'tenant_id' => 'nullable|exists:tenants,id',
             // Beneficiaries (legacy)
             'beneficiaries' => 'nullable|array',
         ]);
