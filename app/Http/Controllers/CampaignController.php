@@ -216,7 +216,7 @@ class CampaignController extends Controller
         
         // Get filter parameters from request
         $universeFilter = $request->input('universe') ?: null;
-        $municipioFilter = ($request->input('municipio') ?: $request->input('territorio')) ?: null;
+        $territorioFilter = ($request->input('municipio') ?: $request->input('territorio')) ?: null;
         $coloniaFilter = $request->input('colonia') ?: null;
         $seccionFilter = $request->input('seccion') ?: null;
         $cdzFilter = $request->input('cdz') ?: null;
@@ -232,29 +232,33 @@ class CampaignController extends Controller
         // Start building query
         $query = Persona::query();
 
-        // 0. Filter by EVENT proximity if no municipio filter provided
+        // 0. Event Context & Proximity Intelligence
         $eventId = $request->input('event_id');
         $event = null;
         if ($eventId) {
             $event = \App\Models\Event::find($eventId);
-            if ($event && !$municipioFilter) {
-                // Default to event's territory for proximity
-                $municipioFilter = $event->municipality;
+            if ($event) {
+                // If the user didn't provide a manual filter, we inherit from the event
+                if (!$territorioFilter && $event->municipality) {
+                    $territorioFilter = $event->municipality;
+                }
+                if (!$coloniaFilter && $event->neighborhood) {
+                    $coloniaFilter = $event->neighborhood;
+                }
             }
         }
 
-        // 0.1 Filter by EVENT audience filters if event exists
+        // 1. Audience Segmentation (Pilar 1 - Generics & Demographics)
         if ($event && $event->target_audience_filters) {
             $filters = is_string($event->target_audience_filters) 
                 ? json_decode($event->target_audience_filters, true) 
                 : $event->target_audience_filters;
             
-            // 1.2 Filtro de Beneficiarios Genéricos (Pilar 1)
             $hasBeneficiaries = $filters['has_beneficiaries'] ?? $filters['has_pets'] ?? false;
             if ($hasBeneficiaries === true || $hasBeneficiaries === 'true') {
                 $query->where(function($q) {
                     $q->whereHas('beneficiarios')
-                        ->orWhereHas('mascotas') // Legacy support
+                        ->orWhereHas('mascotas')
                         ->orWhereJsonContains('universes', 'mascotas')
                         ->orWhereJsonContains('tags', 'tiene_mascotas')
                         ->orWhereJsonContains('tags', 'Dueño de Perro');
@@ -264,39 +268,47 @@ class CampaignController extends Controller
                 $query->where('sexo', $filters['gender']);
             }
             if (!empty($minAge) || !empty($filters['min_age'])) {
-                $minAge = $minAge ?: $filters['min_age'];
-                $query->where('edad', '>=', $minAge);
+                $qMin = $minAge ?: $filters['min_age'];
+                $query->where('edad', '>=', $qMin);
             }
             if (!empty($maxAge) || !empty($filters['max_age'])) {
-                $maxAge = $maxAge ?: $filters['max_age'];
-                $query->where('edad', '<=', $maxAge);
+                $qMax = $maxAge ?: $filters['max_age'];
+                $query->where('edad', '<=', $qMax);
             }
         }
 
-        // 1. Filter by target universes if campaign has them defined
+        // 2. Universe Segmentation (Critical for Campaign alignment)
         if ($campaign->target_universes && count($campaign->target_universes) > 0) {
             $query->whereIn('universe_type', $campaign->target_universes);
         }
 
-        // 2. If specific universe requested, filter by it (handle comma separated)
         if ($universeFilter) {
             $universes = explode(',', $universeFilter);
             $query->whereIn('universe_type', $universes);
         }
 
-        // 3. Super Filter: Municipio/Territorio/Colonia
-        if ($municipioFilter) {
-            $query->where(function($q) use ($municipioFilter) {
-                $q->where('municipio', 'ilike', "%{$municipioFilter}%")
-                  ->orWhere('colonia', 'ilike', "%{$municipioFilter}%")
-                  ->orWhere('region', 'ilike', "%{$municipioFilter}%")
-                  ->orWhere('estado', 'ilike', "%{$municipioFilter}%");
+        // 3. SMART TERRITORY ENGINE (Multi-column resilience)
+        // If a territory or neighborhood is provided, we search across all columns to catch "swapped" or "combined" data
+        if ($territorioFilter || $coloniaFilter) {
+            $query->where(function($q) use ($territorioFilter, $coloniaFilter) {
+                if ($territorioFilter) {
+                    $q->where(function($sq) use ($territorioFilter) {
+                        $sq->where('municipio', 'like', "%{$territorioFilter}%")
+                           ->orWhere('colonia', 'like', "%{$territorioFilter}%")
+                           ->orWhere('region', 'like', "%{$territorioFilter}%")
+                           ->orWhere('estado', 'like', "%{$territorioFilter}%");
+                    });
+                }
+                
+                if ($coloniaFilter) {
+                    $q->orWhere(function($sq) use ($coloniaFilter) {
+                        $sq->where('colonia', 'like', "%{$coloniaFilter}%")
+                           ->orWhere('municipio', 'like', "%{$coloniaFilter}%")
+                           ->orWhere('estado', 'like', "%{$coloniaFilter}%")
+                           ->orWhere('region', 'like', "%{$coloniaFilter}%");
+                    });
+                }
             });
-        }
-
-        // 4. Super Filter: Colonia
-        if ($coloniaFilter) {
-            $query->where('colonia', 'ilike', "%{$coloniaFilter}%");
         }
 
         // 5. Electoral Filter: Sección
@@ -306,25 +318,25 @@ class CampaignController extends Controller
 
         // 6. Citizen Code Filter (CDZ)
         if ($cdzFilter) {
-            $query->where('cdz_code', 'ilike', "%{$cdzFilter}%");
+            $query->where('cdz_code', 'like', "%{$cdzFilter}%");
         }
 
         // 7. Age Range Filter
         if ($minAge) {
-            $query->where('edad', '>=', $minAge);
+            $query->where('edad', '>=', (int)$minAge);
         }
         if ($maxAge) {
-            $query->where('edad', '<=', $maxAge);
+            $query->where('edad', '<=', (int)$maxAge);
         }
 
         // 8. Search by Name / CDZ / CURP
         if ($searchFilter) {
             $query->where(function($q) use ($searchFilter) {
-                $q->where('nombre', 'ilike', "%{$searchFilter}%")
-                  ->orWhere('apellido_paterno', 'ilike', "%{$searchFilter}%")
-                  ->orWhere('cedula', 'ilike', "%{$searchFilter}%")
-                  ->orWhere('curp', 'ilike', "%{$searchFilter}%")
-                  ->orWhere('cdz_code', 'ilike', "%{$searchFilter}%");
+                $q->where('nombre', 'like', "%{$searchFilter}%")
+                  ->orWhere('apellido_paterno', 'like', "%{$searchFilter}%")
+                  ->orWhere('cedula', 'like', "%{$searchFilter}%")
+                  ->orWhere('curp', 'like', "%{$searchFilter}%")
+                  ->orWhere('cdz_code', 'like', "%{$searchFilter}%");
             });
         }
 
@@ -394,7 +406,7 @@ class CampaignController extends Controller
         $debug = [
             'sql' => $query->toSql(),
             'bindings' => $query->getBindings(),
-            'municipioFilter' => $municipioFilter,
+            'territorioFilter' => $territorioFilter,
             'campaign_target_universes' => $campaign->target_universes,
             'count' => $query->count(),
         ];

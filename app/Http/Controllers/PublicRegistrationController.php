@@ -102,6 +102,8 @@ class PublicRegistrationController extends Controller
             'vigencia' => 'nullable|string|max:4',
             'tipo_sangre' => 'nullable|string|max:5',
             'category' => 'nullable|string',
+            'tarifa' => 'nullable|string',
+            'servicios' => 'nullable|string',
             'tags' => 'nullable|array',
             'email' => 'nullable|email',
             'identification_number' => 'nullable|string',
@@ -113,13 +115,10 @@ class PublicRegistrationController extends Controller
             'longitude' => 'nullable|numeric',
             'children_under_5_count' => 'nullable|integer|min:0|max:20',
             'children_details' => 'nullable|array',
-            'children_details.*.name' => 'nullable|string|max:100',
-            'children_details.*.age' => 'nullable|integer|min:0|max:5',
             'emergency_contact' => 'nullable|string|max:255',
             'emergency_phone' => 'nullable|string|max:20',
             'leader_id' => 'nullable|exists:personas,id',
             'tenant_id' => 'nullable|exists:tenants,id',
-            // Beneficiaries (legacy)
             'beneficiaries' => 'nullable|array',
         ]);
 
@@ -176,14 +175,15 @@ class PublicRegistrationController extends Controller
 
             $tenantId = $request->tenant_id ?? \App\Models\Tenant::first()?->id;
 
-            // Create Persona with ALL fields for CRM
             $persona = Persona::create([
                 'curp' => $request->curp,
                 'clave_elector' => $request->clave_elector,
                 'seccion' => $request->seccion,
                 'vigencia' => $request->vigencia,
                 'tipo_sangre' => $request->tipo_sangre,
-                'categoria' => $request->category,
+                'categoria' => $request->category ?? $request->categoria,
+                'tarifa' => $request->tarifa,
+                'servicios' => $request->servicios,
                 'nombre' => $request->name,
                 'apellido_paterno' => $request->last_name,
                 'apellido_materno' => $request->maternal_name ?? '',
@@ -664,6 +664,7 @@ class PublicRegistrationController extends Controller
             'whatsapp' => 'required|string',
             'curp' => 'nullable|string|max:18',
             'clave_elector' => 'nullable|string|max:18',
+            'seccion' => 'nullable|string|max:10',
             'vigencia' => 'nullable|string|max:4',
             'tipo_sangre' => 'nullable|string|max:5',
             'cedula' => 'nullable|string|max:50',
@@ -682,6 +683,9 @@ class PublicRegistrationController extends Controller
             'estado' => 'nullable|string|max:255',
             'latitude' => 'nullable|numeric',
             'longitude' => 'nullable|numeric',
+            'categoria' => 'nullable|string|max:255',
+            'tarifa' => 'nullable|string|max:255',
+            'servicios' => 'nullable|string|max:255',
             'tags' => 'nullable|array',
             'universes' => 'nullable|array',
             'metadata' => 'nullable|array',
@@ -694,8 +698,12 @@ class PublicRegistrationController extends Controller
         $personaData = [
             'curp' => $validated['curp'] ?? null,
             'clave_elector' => $validated['clave_elector'] ?? null,
+            'seccion' => $validated['seccion'] ?? null,
             'vigencia' => $validated['vigencia'] ?? null,
             'tipo_sangre' => $validated['tipo_sangre'] ?? null,
+            'categoria' => $validated['categoria'] ?? null,
+            'tarifa' => $validated['tarifa'] ?? null,
+            'servicios' => $validated['servicios'] ?? null,
             'cedula' => $validated['cedula'] ?? ('ID-' . \Illuminate\Support\Str::random(10)),
             'nombre' => $validated['nombre'],
             'apellido_paterno' => $validated['apellido_paterno'] ?? '',

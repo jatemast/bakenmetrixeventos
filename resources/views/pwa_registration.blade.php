@@ -362,6 +362,58 @@
                         <label>CURP (18 dígitos) <span class="required">*</span></label>
                         <input type="text" id="curp" placeholder="ABC1234567890" maxlength="18" required>
                     </div>
+                    <div class="input-group">
+                        <label>Tipo de Sangre</label>
+                        <select id="tipo_sangre">
+                            <option value="">Desconocido</option>
+                            <option value="A+">A+</option>
+                            <option value="A-">A-</option>
+                            <option value="B+">B+</option>
+                            <option value="B-">B-</option>
+                            <option value="O+">O+</option>
+                            <option value="O-">O-</option>
+                            <option value="AB+">AB+</option>
+                            <option value="AB-">AB-</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sección Electorales -->
+            <div class="card">
+                <h2>🗳️ Datos Electorales</h2>
+                <div class="input-group">
+                    <label>Clave de Elector</label>
+                    <input type="text" id="clave_elector" placeholder="Ej: ABCDEF12345678H900">
+                </div>
+                <div class="row">
+                    <div class="input-group">
+                        <label>Sección</label>
+                        <input type="number" id="seccion" placeholder="0000">
+                    </div>
+                    <div class="input-group">
+                        <label>Vigencia (Año)</label>
+                        <input type="number" id="vigencia" placeholder="2034">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sección Clasificación -->
+            <div class="card">
+                <h2>📊 Clasificación y Servicios</h2>
+                <div class="row">
+                    <div class="input-group">
+                        <label>Categoría</label>
+                        <input type="text" id="categoria" placeholder="Ej: Preferente, General">
+                    </div>
+                    <div class="input-group">
+                        <label>Tarifa</label>
+                        <input type="text" id="tarifa" placeholder="Ej: Social">
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label>Servicios de Interés</label>
+                    <input type="text" id="servicios" placeholder="Ej: Agua, Luz, Predial">
                 </div>
             </div>
 
@@ -791,6 +843,13 @@
                 estado: document.getElementById('estado').value || 'Querétaro',
                 latitude: document.getElementById('latitude').value || null,
                 longitude: document.getElementById('longitude').value || null,
+                tipo_sangre: document.getElementById('tipo_sangre').value || null,
+                clave_elector: document.getElementById('clave_elector').value || null,
+                seccion: document.getElementById('seccion').value || null,
+                vigencia: document.getElementById('vigencia').value || null,
+                categoria: document.getElementById('categoria').value || null,
+                tarifa: document.getElementById('tarifa').value || null,
+                servicios: document.getElementById('servicios').value || null,
                 tags: finalTags,
                 universes: activeUniverses,
                 leader_id: urlParams.get('leader'),
