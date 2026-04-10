@@ -20,7 +20,22 @@ class PublicRegistrationController extends Controller
      */
     public function checkWhatsApp(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $input = $request->all();
+        
+        // Handle array inputs from n8n (flattening)
+        if (isset($input['whatsapp_number']) && is_array($input['whatsapp_number'])) {
+            $input['whatsapp_number'] = $input['whatsapp_number'][0] ?? null;
+        }
+        if (isset($input['whatsapp']) && is_array($input['whatsapp'])) {
+            $input['whatsapp'] = $input['whatsapp'][0] ?? null;
+        }
+
+        // Allow 'whatsapp' as alias for 'whatsapp_number' for n8n compatibility
+        if (!isset($input['whatsapp_number']) && isset($input['whatsapp'])) {
+            $input['whatsapp_number'] = $input['whatsapp'];
+        }
+
+        $validator = Validator::make($input, [
             'whatsapp_number' => 'required|string'
         ]);
 
@@ -70,7 +85,12 @@ class PublicRegistrationController extends Controller
      */
     public function register(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $input = $request->all();
+        if (!isset($input['whatsapp_number']) && isset($input['whatsapp'])) {
+            $input['whatsapp_number'] = $input['whatsapp'];
+        }
+
+        $validator = Validator::make($input, [
             'name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
             'maternal_name' => 'nullable|string|max:255',
@@ -286,7 +306,12 @@ class PublicRegistrationController extends Controller
      */
     public function registerForEvent(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $input = $request->all();
+        if (!isset($input['whatsapp_number']) && isset($input['whatsapp'])) {
+            $input['whatsapp_number'] = $input['whatsapp'];
+        }
+
+        $validator = Validator::make($input, [
             'event_id' => 'required|exists:events,id',
             'persona_id' => 'nullable|exists:personas,id',
             'whatsapp_number' => 'required_without:persona_id|string',
@@ -397,7 +422,12 @@ class PublicRegistrationController extends Controller
      */
     public function getPersonaProfile(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $input = $request->all();
+        if (!isset($input['whatsapp_number']) && isset($input['whatsapp'])) {
+            $input['whatsapp_number'] = $input['whatsapp'];
+        }
+
+        $validator = Validator::make($input, [
             'persona_id' => 'nullable|exists:personas,id',
             'whatsapp_number' => 'required_without:persona_id|string'
         ]);
@@ -499,8 +529,18 @@ class PublicRegistrationController extends Controller
         $phone = preg_replace('/[^0-9]/', '', $phone);
         
         // Handle n8n array flattening/concatenation bugs (e.g., repeating numbers)
+        // If number is very long and has a repeating pattern at start/end
+        if (strlen($phone) >= 20) {
+            $half = strlen($phone) / 2;
+            $firstHalf = substr($phone, 0, $half);
+            $secondHalf = substr($phone, $half);
+            if ($firstHalf === $secondHalf) {
+                $phone = $firstHalf;
+            }
+        }
+        
         if (strlen($phone) > 15) {
-            $phone = substr($phone, 0, 12); // Truncate to first valid phone length
+            $phone = substr($phone, 0, 12); // Fallback to standard length
         }
 
         // Add country code if not present (assuming Mexico +52)
@@ -639,6 +679,11 @@ class PublicRegistrationController extends Controller
      */
     public function storeSuperPersona(Request $request)
     {
+        // Alias support for CRM standardization
+        if (!$request->has('whatsapp') && $request->has('whatsapp_number')) {
+            $request->merge(['whatsapp' => $request->whatsapp_number]);
+        }
+
         $validated = $request->validate([
             'whatsapp' => 'required|string',
             'curp' => 'nullable|string|max:18',

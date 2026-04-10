@@ -229,9 +229,19 @@ class PersonaController extends Controller
     private function normalizePhoneNumber($phone)
     {
         $phone = preg_replace('/[^0-9]/', '', $phone);
+        
+        // Handle repeating numbers from automation flakiness
+        if (strlen($phone) >= 20) {
+            $half = strlen($phone) / 2;
+            if (substr($phone, 0, $half) === substr($phone, $half)) {
+                $phone = substr($phone, 0, $half);
+            }
+        }
+
         if (strlen($phone) > 15) {
             $phone = substr($phone, 0, 12);
         }
+        
         if (strlen($phone) == 10) {
             $phone = '52' . $phone;
         }
