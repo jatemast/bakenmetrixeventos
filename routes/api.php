@@ -72,7 +72,7 @@ Route::get('/public/events', [EventController::class, 'allEvents']);
 Route::post('/public/ai-config', [PublicRegistrationController::class, 'getAIConfig']);
 
 // Conversational Session Routes (High-Velocity Master Agent Support)
-Route::post('/public/sessions/check', [App\Http\Controllers\Api\ConversationalSessionController::class, 'checkOrStart']);
+Route::match(['get', 'post'], '/public/sessions/check', [App\Http\Controllers\Api\ConversationalSessionController::class, 'checkOrStart']);
 Route::post('/public/sessions/update-step', [App\Http\Controllers\Api\ConversationalSessionController::class, 'updateStep']);
 Route::post('/public/sessions/complete', [App\Http\Controllers\Api\ConversationalSessionController::class, 'complete']);
 

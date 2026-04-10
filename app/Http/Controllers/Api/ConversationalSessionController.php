@@ -20,17 +20,26 @@ class ConversationalSessionController extends Controller
      */
     public function checkOrStart(Request $request): JsonResponse
     {
-        // Handle both 'phone' and 'whatsapp_number' for flexibility with n8n
-        $phone = $request->input('phone') ?? $request->input('whatsapp_number') ?? $request->input('sender');
+        // Handle both GET (query) and POST (body)
+        // Check multiple possible parameter names for maximum n8n compatibility
+        $phone = $request->input('phone') ?? 
+                 $request->input('whatsapp_number') ?? 
+                 $request->input('sender') ?? 
+                 $request->input('whatsapp') ??
+                 $request->query('phone') ??
+                 $request->query('whatsapp_number') ??
+                 $request->query('whatsapp');
 
         if (!$phone) {
             return response()->json([
                 'success' => false, 
-                'message' => 'Phone number is required'
+                'message' => 'Phone number is required',
+                'resolved' => false,
+                'action' => 'none'
             ], 422);
         }
 
-        $message = $request->input('message') ?? $request->input('text');
+        $message = $request->input('message') ?? $request->input('text') ?? $request->query('message');
 
         $result = $this->eventContextService->resolveEventContext($phone, $message);
 
