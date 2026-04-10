@@ -21,9 +21,32 @@ class TenantMiddleware
         if (auth()->check()) {
             $tenantId = auth()->user()->tenant_id;
         } 
-        // 2. Fallback to header (useful for pre-login or multi-tenant choice)
-        elseif ($request->hasHeader('X-Tenant-Id')) {
+        // 2. Identify by subdomain (SaaS automatic)
+        if (!$tenantId) {
+            $host = $request->getHost();
+            // Assuming your domain is 'soymetrix.com' or similar
+            // If it's a subdomain like 'cliente1.soymetrix.com'
+            $parts = explode('.', $host);
+            if (count($parts) > 2) {
+                $subdomain = $parts[0];
+                if ($subdomain !== 'www' && $subdomain !== 'eventos2' && $subdomain !== 'api') {
+                    $tenant = \App\Models\Tenant::where('slug', $subdomain)->first();
+                    if ($tenant) {
+                        $tenantId = $tenant->id;
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback to header
+        if (!$tenantId && $request->hasHeader('X-Tenant-Id')) {
             $tenantId = $request->header('X-Tenant-Id');
+        }
+        
+        // 4. Fallback to Domain/Slug header
+        if (!$tenantId && $request->hasHeader('X-Tenant-Domain')) {
+            $tenant = \App\Models\Tenant::where('slug', $request->header('X-Tenant-Domain'))->first();
+            if ($tenant) $tenantId = $tenant->id;
         }
 
         if ($tenantId) {

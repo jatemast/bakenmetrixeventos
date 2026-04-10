@@ -72,4 +72,21 @@ class QrImageController extends Controller
             'note' => 'Scan this QR to start the AI conversation for CRM onboarding.'
         ]);
     }
+
+    /**
+     * Serve a QR code as an image directly (PNG)
+     */
+    public function serveQrImage(string $code): \Illuminate\Http\Response
+    {
+        $qr = \App\Models\QrCode::where('code', $code)->firstOrFail();
+        
+        $image = \SimpleSoftwareIO\QrCode\Facades\QrCode::format('png')
+            ->size(500)
+            ->errorCorrection('H')
+            ->generate($code);
+            
+        return response($image)
+            ->header('Content-Type', 'image/png')
+            ->header('Cache-Control', 'public, max-age=86400');
+    }
 }
