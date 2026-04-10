@@ -853,6 +853,7 @@
                 tags: finalTags,
                 universes: activeUniverses,
                 leader_id: urlParams.get('leader'),
+                tenant_id: urlParams.get('tenant'),
                 event_id: urlParams.get('event'),
                 timestamp: new Date().toISOString()
             };
@@ -872,7 +873,8 @@
                     document.getElementById('superPersonaForm').style.display = 'none';
                     document.getElementById('successScreen').style.display = 'block';
                 } else {
-                    alert("⚠️ Error del servidor. Revisa los datos.");
+                    const errorData = await response.json();
+                    alert("⚠️ " + (errorData.message || "Error del servidor. Revisa los datos."));
                     btn.disabled = false;
                     btn.innerText = "💾 REGISTRAR CIUDADANO";
                 }

@@ -96,6 +96,7 @@ Route::get('/public/events/{id}/registration-form', [PublicRegistrationControlle
 Route::get('/public/postal-code/{cp}', [App\Http\Controllers\PostalCodeController::class, 'lookup']);
 Route::get('/public/events/reminders-due', [EventController::class, 'getRemindersDue']);
 Route::post('/public/profile', [PublicRegistrationController::class, 'getPersonaProfile']);
+Route::get('/public/qr-recovery/{whatsapp}', [PublicRegistrationController::class, 'qrRecovery']);
 
 // User Portal Routes (Citizen Self-Service)
 // OTP Authentication (public - no token required)
@@ -129,6 +130,7 @@ Route::get('/qr/{code}/details', [QrScanController::class, 'qrDetails']);
 // QR Code Data Endpoint (for n8n - fetches stored QR images)
 Route::get('/events/{eventId}/qr-data', [QrImageController::class, 'getEventQrData']);
 Route::get('/qr/crm-registration', [QrImageController::class, 'getCrmRegistrationQr']);
+Route::get('/qr/generate/{code}', [QrImageController::class, 'serveQrImage']);
 
 // WhatsApp Routes
 Route::post('/whatsapp/resolve-event-context', [WhatsAppController::class, 'resolveEventContext']);

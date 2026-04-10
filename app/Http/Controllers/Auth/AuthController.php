@@ -33,34 +33,48 @@ class AuthController extends Controller
 
         $tenantId = $request->tenant_id;
 
-        // If no tenant_id provided, create a new one automatically
-        if (empty($tenantId)) {
-            $tenant = \App\Models\Tenant::create([
-                'name' => 'Universo de ' . $request->name,
-                'slug' => \Illuminate\Support\Str::slug($request->name . '-' . uniqid()),
-            ]);
-            $tenantId = $tenant->id;
-        }
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $tenantId) {
+            try {
+                // If no tenant_id provided, create a new one automatically (SaaS Mode)
+                if (empty($tenantId)) {
+                    $tenant = \App\Models\Tenant::create([
+                        'name' => 'Universo de ' . $request->name,
+                        'slug' => \Illuminate\Support\Str::slug($request->name . '-' . uniqid()),
+                        'is_active' => true,
+                    ]);
+                    $tenantId = $tenant->id;
+                    \Illuminate\Support\Facades\Log::info("Automatic Tenant Created for SaaS registration", ['tenant_id' => $tenantId, 'user' => $request->email]);
+                }
 
-        $user = User::create([
-            'tenant_id' => $tenantId,
-            'name' => $request->name,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-            'role' => 'admin',
-        ]);
+                $user = User::create([
+                    'tenant_id' => $tenantId,
+                    'name' => $request->name,
+                    'email' => $request->email,
+                    'password' => Hash::make($request->password),
+                    'role' => 'admin',
+                    'is_active' => true,
+                ]);
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+                $token = $user->createToken('auth_token')->plainTextToken;
 
-        return response()->json([
-            'message' => 'Registro exitoso',
-            'access_token' => $token,
-            'token_type' => 'Bearer',
-            'tenant_id' => $user->tenant_id,
-            'id' => $user->id,
-            'name' => $user->name,
-            'email' => $user->email,
-        ], 201);
+                return response()->json([
+                    'message' => 'Registro exitoso',
+                    'access_token' => $token,
+                    'token_type' => 'Bearer',
+                    'tenant_id' => $user->tenant_id,
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                ], 201);
+
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::error('SaaS Registration Error: ' . $e->getMessage());
+                return response()->json([
+                    'message' => 'Error en el proceso de registro SaaS',
+                    'error' => $e->getMessage()
+                ], 500);
+            }
+        });
     }
 
     public function login(LoginRequest $request)

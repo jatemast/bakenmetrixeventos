@@ -47,7 +47,7 @@ class PublicRegistrationController extends Controller
             ], 422);
         }
 
-        $whatsappNumber = $this->normalizePhoneNumber($request->whatsapp_number);
+        $whatsappNumber = $this->normalizePhoneNumber($input['whatsapp_number']);
 
         $persona = Persona::where('numero_celular', $whatsappNumber)->first();
 
@@ -173,7 +173,7 @@ class PublicRegistrationController extends Controller
                 $tags[] = 'tel_emergencia:' . $request->emergency_phone;
             }
 
-            $tenantId = $request->tenant_id ?? \App\Models\Tenant::first()?->id;
+            $tenantId = $request->tenant_id ?? (app()->bound('tenant_id') ? app('tenant_id') : \App\Models\Tenant::first()?->id);
 
             $persona = Persona::create([
                 'curp' => $request->curp,
@@ -649,18 +649,17 @@ class PublicRegistrationController extends Controller
         $cacheKey = "ai_config_{$eventId}_{$personaId}";
 
         return \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function () use ($event, $persona, $eventId, $personaId) {
-            $eventName = $event->nombre;
+            $eventName = $event->detail; // In the DB it's 'detail'
             $eventTopic = $event->detail;
-            $eventLocation = $event->ubicacion ?? ($event->calle . ', ' . $event->colonia);
+            $eventLocation = $event->street . ', ' . $event->neighborhood;
             
             $petList = $persona->mascotas->map(fn($p) => "{$p->nombre} ({$p->tipo})")->join(', ');
 
             $unitLabel = $event->slot_unit_name ?? 'mesa';
 
-            $prompt = "Eres MetrixBot, el asistente de IA VIP para el sistema de eventos de la Municipalidad. 🚀\n\n"
+            $prompt = "Eres MetrixBot, el asistente de IA VIP para el sistema de eventos. 🚀\n\n"
                     . "--- CONTEXTO DEL EVENTO ---\n"
-                    . "NOMBRE: {$eventName}\n"
-                    . "TEMÁTICA: {$eventTopic}\n"
+                    . "EVENTO: {$eventName}\n"
                     . "UBICACIÓN: {$eventLocation}\n"
                     . "--- DATOS DEL CIUDADANO ---\n"
                     . "NOMBRE: {$persona->nombre} {$persona->apellido_paterno}\n"
@@ -668,12 +667,12 @@ class PublicRegistrationController extends Controller
                     . ($petList ? "MASCOTAS: {$petList}\n" : "NO TIENE MASCOTAS REGISTRADAS.\n")
                     . "----------------------------\n\n"
                     . "REGLAS DE ORO:\n"
-                    . "1. Sé conciso, amable y usa emojis.\n"
-                    . "2. Tu objetivo principal es ayudar al ciudadano a agendar una cita para este evento específico.\n"
-                    . "3. Si el ciudadano pregunta por los puntos, dile que ganará " . ($event->bonus_points_for_attendee ?? 5) . " PUNTOS por su asistencia completa.\n"
-                    . "4. Pregúntale a quién de sus mascotas traerá si el evento es de bienestar animal.\n"
+                    . "1. NUNCA, bajo ninguna circunstancia, empieces tu respuesta con el signo '='.\n"
+                    . "2. Sé conciso, amable y usa emojis.\n"
+                    . "3. Tu objetivo es ayudar al ciudadano con este evento específico.\n"
+                    . "4. Si preguntan por puntos, ganarán " . ($event->bonus_points_for_attendee ?? 5) . " PUNTOS.\n"
                     . "5. Informa que se le asignará una {$unitLabel} para su atención.\n"
-                    . "6. Consulta siempre los horarios disponibles usando la herramienta slots antes de prometer una hora.\n\n"
+                    . "6. Pide confirmación de asistencia si aún no lo han hecho.\n\n"
                     . "TONO: VIP, profesional y servicial.";
 
             return response()->json([
@@ -726,10 +725,44 @@ class PublicRegistrationController extends Controller
             'universes' => 'nullable|array',
             'metadata' => 'nullable|array',
             'notes' => 'nullable|string',
-            'leader_id' => 'nullable|exists:personas,id'
+            'leader_id' => 'nullable|exists:personas,id',
+            'tenant_id' => 'nullable|exists:tenants,id'
         ]);
 
         $whatsapp = $this->normalizePhoneNumber($validated['whatsapp']);
+
+        // Robustness: Check for unique constraints before updateOrCreate to provide better error messages
+        // Fields with UNIQUE constraints: curp, email, cedula, clave_elector, codigo_ciudadano
+        $duplicates = [];
+        
+        if (!empty($validated['curp'])) {
+            $dup = Persona::where('curp', $validated['curp'])->where('numero_celular', '!=', $whatsapp)->exists();
+            if ($dup) $duplicates[] = 'El CURP ya está registrado con otro número.';
+        }
+
+        if (!empty($validated['email'])) {
+            $dup = Persona::where('email', $validated['email'])->where('numero_celular', '!=', $whatsapp)->exists();
+            if ($dup) $duplicates[] = 'El correo electrónico ya está registrado con otro número.';
+        }
+
+        if (!empty($validated['clave_elector'])) {
+            $dup = Persona::where('clave_elector', $validated['clave_elector'])->where('numero_celular', '!=', $whatsapp)->exists();
+            if ($dup) $duplicates[] = 'La Clave de Elector ya está registrada con otro número.';
+        }
+
+        if (!empty($validated['cedula'])) {
+            $dup = Persona::where('cedula', $validated['cedula'])->where('numero_celular', '!=', $whatsapp)->exists();
+            if ($dup) $duplicates[] = 'El número de Cédula/Identificación ya está registrado con otro número.';
+        }
+
+        if (count($duplicates) > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => implode(' ', $duplicates),
+                'error_code' => 'DUPLICATE_ENTRY',
+                'errors' => $duplicates
+            ], 422);
+        }
 
         $personaData = [
             'curp' => $validated['curp'] ?? null,
@@ -740,7 +773,7 @@ class PublicRegistrationController extends Controller
             'categoria' => $validated['categoria'] ?? null,
             'tarifa' => $validated['tarifa'] ?? null,
             'servicios' => $validated['servicios'] ?? null,
-            'cedula' => $validated['cedula'] ?? ('ID-' . \Illuminate\Support\Str::random(10)),
+            'cedula' => !empty($validated['cedula']) ? $validated['cedula'] : ('ID-' . \Illuminate\Support\Str::random(10)),
             'nombre' => $validated['nombre'],
             'apellido_paterno' => $validated['apellido_paterno'] ?? '',
             'apellido_materno' => $validated['apellido_materno'] ?? '',
@@ -771,58 +804,79 @@ class PublicRegistrationController extends Controller
             }
         }
 
-        $persona = Persona::updateOrCreate(
-            ['numero_celular' => $whatsapp],
-            array_merge($personaData, [
-                'sexo' => $validated['sexo'] ?? 'O',
-                'email' => $validated['email'] ?? null,
-                'calle' => $validated['calle'] ?? '',
-                'numero_exterior' => $validated['numero_exterior'] ?? '',
-                'numero_interior' => $validated['numero_interior'] ?? '',
-                'colonia' => $validated['colonia'] ?? '',
-                'codigo_postal' => $validated['codigo_postal'] ?? '',
-                'municipio' => $validated['municipio'] ?? '',
-                'estado' => $validated['estado'] ?? 'Querétaro',
-                'region' => '',
-                'numero_telefono' => $whatsapp,
-                'universe_type' => 'U1',
-                'universe_group' => 'I',
-                'is_leader' => false,
-                'loyalty_balance' => 0,
-                'tags' => $validated['tags'] ?? [],
-                'universes' => $validated['universes'] ?? [],
-                'metadata' => $validated['metadata'] ?? [],
-                'notes' => $validated['notes'] ?? null,
-                'leader_id' => $validated['leader_id'] ?? null,
-                'updated_at' => now(),
-                'tenant_id' => \App\Models\Tenant::first()?->id
-            ])
-        );
+            try {
+                $persona = Persona::updateOrCreate(
+                    ['numero_celular' => $whatsapp],
+                    array_merge($personaData, [
+                        'sexo' => $validated['sexo'] ?? 'O',
+                        'email' => $validated['email'] ?? null,
+                        'calle' => $validated['calle'] ?? '',
+                        'numero_exterior' => $validated['numero_exterior'] ?? '',
+                        'numero_interior' => $validated['numero_interior'] ?? '',
+                        'colonia' => $validated['colonia'] ?? '',
+                        'codigo_postal' => $validated['codigo_postal'] ?? '',
+                        'municipio' => $validated['municipio'] ?? '',
+                        'estado' => $validated['estado'] ?? 'Querétaro',
+                        'region' => '',
+                        'numero_telefono' => $whatsapp,
+                        'universe_type' => 'U1',
+                        'universe_group' => 'I',
+                        'is_leader' => false,
+                        'loyalty_balance' => 0,
+                        'tags' => $validated['tags'] ?? [],
+                        'universes' => $validated['universes'] ?? [],
+                        'metadata' => $validated['metadata'] ?? [],
+                        'notes' => $validated['notes'] ?? null,
+                        'leader_id' => $validated['leader_id'] ?? null,
+                        'updated_at' => now(),
+                        'tenant_id' => $validated['tenant_id'] ?? (app()->bound('tenant_id') ? app('tenant_id') : \App\Models\Tenant::first()?->id)
+                    ])
+                );
 
-        // Actualizar Geo (PostGIS) si hay coordenadas
-        if (!empty($validated['latitude']) && !empty($validated['longitude'])) {
-            $lat = $validated['latitude'];
-            $lng = $validated['longitude'];
-            
-            DB::table('personas')
-                ->where('id', $persona->id)
-                ->update([
-                    'location' => DB::raw("ST_SetSRID(ST_MakePoint($lng, $lat), 4326)")
+                // Actualizar Geo (PostGIS) si hay coordenadas
+                if (!empty($validated['latitude']) && !empty($validated['longitude'])) {
+                    try {
+                        $lat = $validated['latitude'];
+                        $lng = $validated['longitude'];
+                        
+                        DB::table('personas')
+                            ->where('id', $persona->id)
+                            ->update([
+                                'location' => DB::raw("ST_SetSRID(ST_MakePoint($lng, $lat), 4326)")
+                            ]);
+                    } catch (\Exception $geoEx) {
+                        Log::warning('PostGIS location update failed (likely restricted by DB driver): ' . $geoEx->getMessage());
+                    }
+                }
+
+                // Si es un Censo 100% Nuevo, enviarle el Mensaje Inmediato por WhatsApp
+                if ($persona->wasRecentlyCreated) {
+                    try {
+                        $wspservice = app(\App\Services\WhatsAppNotificationService::class);
+                        $wspservice->sendGreetingNewCitizen($persona);
+                    } catch (\Exception $e) {
+                        Log::warning('WhatsApp greeting failed: ' . $e->getMessage());
+                    }
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Universo del Ciudadano ' . $persona->nombre . ' actualizado en 360°',
+                    'persona_id' => $persona->id
                 ]);
-        }
 
-        // Si es un Censo 100% Nuevo, enviarle el Mensaje Inmediato por WhatsApp
-        if ($persona->wasRecentlyCreated) {
-            $wspservice = app(\App\Services\WhatsAppNotificationService::class);
-            $wspservice->sendGreetingNewCitizen($persona);
+            } catch (\Exception $e) {
+                Log::error('SuperPersona Storage Error: ' . $e->getMessage(), [
+                    'whatsapp' => $whatsapp,
+                    'exception' => $e
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error al guardar en la base de datos: ' . $e->getMessage()
+                ], 500);
+            }
         }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Universo del Ciudadano ' . $persona->nombre . ' actualizado en 360°',
-            'persona_id' => $persona->id
-        ]);
-    }
 
     /**
      * API de Renderizado de Formularios (Pilar 2)
@@ -857,6 +911,69 @@ class PublicRegistrationController extends Controller
                 'postal_code_lookup_url' => '/api/public/postal-code/{cp}',
             ],
             'version' => '2.1'
+        ]);
+    }
+
+    /**
+     * Recovery API for unique QR codes (Lideres U3 y Militantes U4)
+     */
+    public function qrRecovery($whatsapp): \Illuminate\Http\JsonResponse
+    {
+        $whatsapp = $this->normalizePhoneNumber($whatsapp);
+        $persona = Persona::where('numero_celular', $whatsapp)->first();
+
+        if (!$persona) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ciudadano no encontrado en el sistema.'
+            ], 404);
+        }
+
+        $results = [];
+
+        // 1. Check for Leader QR (QR2-L) - Latest Active Event
+        $leaderQr = \App\Models\QrCode::where('persona_id', $persona->id)
+            ->where('type', 'QR2-L')
+            ->where('is_active', true)
+            ->orderBy('created_at', 'desc')
+            ->first();
+
+        if ($leaderQr) {
+            $results['leader_qr'] = [
+                'code' => $leaderQr->code,
+                'event_name' => $leaderQr->event?->detail ?? 'Evento',
+                'image_url' => url('api/qr/generate/' . $leaderQr->code)
+            ];
+        }
+
+        // 2. Check for Militant QR (QR-MILITANT) - Latest Campaign
+        $militantQr = \App\Models\QrCode::where('persona_id', $persona->id)
+            ->where('type', 'QR-MILITANT')
+            ->where('is_active', true)
+            ->orderBy('created_at', 'desc')
+            ->first();
+
+        if ($militantQr) {
+            $results['militant_qr'] = [
+                'code' => $militantQr->code,
+                'campaign_name' => $militantQr->campaign?->nombre ?? 'Campaña',
+                'image_url' => url('api/qr/generate/' . $militantQr->code)
+            ];
+        }
+
+        if (empty($results)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No se encontraron QRs únicos activos para este número.',
+                'universe' => $persona->universe_type
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'persona' => $persona->nombre,
+            'universe' => $persona->universe_type,
+            'qrs' => $results
         ]);
     }
 
