@@ -43,7 +43,51 @@ class EventController extends Controller
                 $data['pdf_path'] = $filePath;
             }
 
+            // Decode form_schema if sent as JSON string
+            if (isset($data['form_schema']) && is_string($data['form_schema'])) {
+                $decoded = json_decode($data['form_schema'], true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $data['form_schema'] = $decoded;
+                }
+            }
+
             $event = Event::create($data);
+
+            // ── Auto-apply contextual template from EventType ──────────────
+            // If no custom form_schema was provided, inherit from EventType
+            $eventType = $event->eventType;
+            if ($eventType) {
+                $templateUpdates = [];
+
+                // Inherit form_schema from template if event doesn't have its own
+                if (empty($data['form_schema']) && !empty($eventType->default_form_schema)) {
+                    $templateUpdates['form_schema'] = $eventType->default_form_schema;
+                }
+
+                // Inherit success_message from template if not set
+                if (empty($data['success_message']) && !empty($eventType->success_message)) {
+                    $templateUpdates['success_message'] = $eventType->success_message;
+                }
+
+                // Auto-apply points configuration from template if not explicitly set
+                if (!empty($eventType->default_points_config)) {
+                    $pointsConfig = $eventType->default_points_config;
+                    if (empty($data['bonus_points_for_attendee']) && isset($pointsConfig['attendee'])) {
+                        $templateUpdates['bonus_points_for_attendee'] = $pointsConfig['attendee'];
+                    }
+                    if (empty($data['bonus_points_for_leader']) && isset($pointsConfig['leader'])) {
+                        $templateUpdates['bonus_points_for_leader'] = $pointsConfig['leader'];
+                    }
+                    if (empty($data['bonus_points_per_referral']) && isset($pointsConfig['referral'])) {
+                        $templateUpdates['bonus_points_per_referral'] = $pointsConfig['referral'];
+                    }
+                }
+
+                if (!empty($templateUpdates)) {
+                    $event->update($templateUpdates);
+                    Log::info("Applied contextual template from EventType '{$eventType->name}' to event {$event->id}", array_keys($templateUpdates));
+                }
+            }
 
             // Auto-generate QR codes for the event
             $generatedQrs = $this->qrCodeService->generateEventQrCodes($event);

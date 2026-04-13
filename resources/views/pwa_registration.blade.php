@@ -853,7 +853,7 @@
                 tags: finalTags,
                 universes: activeUniverses,
                 leader_id: urlParams.get('leader'),
-                tenant_id: urlParams.get('tenant'),
+                tenant_id: urlParams.get('tenant') || '7b544b80-315c-4606-aac9-c9846d2d09de', // Default Metrix Tenant
                 event_id: urlParams.get('event'),
                 timestamp: new Date().toISOString()
             };

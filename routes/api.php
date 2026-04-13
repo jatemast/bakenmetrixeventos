@@ -21,6 +21,7 @@ use App\Http\Controllers\UserPortalController;
 use App\Http\Controllers\EventSlotController;
 use App\Http\Controllers\MetricsController;
 use App\Http\Controllers\EventTypeController;
+use App\Http\Controllers\OnboardingController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Log;
@@ -97,6 +98,11 @@ Route::get('/public/postal-code/{cp}', [App\Http\Controllers\PostalCodeControlle
 Route::get('/public/events/reminders-due', [EventController::class, 'getRemindersDue']);
 Route::post('/public/profile', [PublicRegistrationController::class, 'getPersonaProfile']);
 Route::get('/public/qr-recovery/{whatsapp}', [PublicRegistrationController::class, 'qrRecovery']);
+
+// ── Onboarding & CRM Database Growth (Senior Requirement) ──────
+// Public: cualquiera que escanee un QR puede registrarse
+Route::post('/onboarding/register', [OnboardingController::class, 'handleRegistration']);
+Route::get('/onboarding/urls', [OnboardingController::class, 'getOnboardingUrls']); // PUBLICO TEMPORAL PARA TEST
 
 // User Portal Routes (Citizen Self-Service)
 // OTP Authentication (public - no token required)
@@ -255,6 +261,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/campaigns/{campaignId}/militant-qrs/generate', [MilitantQrController::class, 'generateCampaignMilitantQrs']);
     Route::post('/campaigns/{campaignId}/militant-qrs/persona/{personaId}/regenerate', [MilitantQrController::class, 'regenerateMilitantQr']);
     Route::get('/campaigns/{campaignId}/militant-qrs/stats', [MilitantQrController::class, 'getMilitantQrStats']);
+
+    // Event Types Management (Admin CRUD)
+    Route::post('/event-types', [EventTypeController::class, 'store']);
+    Route::put('/event-types/{id}', [EventTypeController::class, 'update']);
+    Route::delete('/event-types/{id}', [EventTypeController::class, 'destroy']);
 });
 
 // Personas Routes (public)
@@ -262,3 +273,5 @@ Route::apiResource('personas', PersonaController::class);
 
 // Event Types (public for form building)
 Route::get('/event-types', [EventTypeController::class, 'index']);
+Route::get('/event-types/{id}', [EventTypeController::class, 'show']);
+Route::get('/event-types/{id}/preview-template', [EventTypeController::class, 'previewTemplate']);

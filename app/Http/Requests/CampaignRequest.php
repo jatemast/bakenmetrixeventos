@@ -40,8 +40,6 @@ class CampaignRequest extends FormRequest
             'number_of_events' => 'nullable|integer|min:0',
             'campaign_number' => 'nullable|integer|unique:campaigns,campaign_number',
             'status' => 'nullable|string|in:draft,scheduled,active,completed,cancelled',
-            'form_schema' => 'nullable',
-            'success_message' => 'nullable|string',
         ];
     }
 
@@ -56,15 +54,6 @@ class CampaignRequest extends FormRequest
             if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
                 $this->merge([
                     'target_universes' => $decoded
-                ]);
-            }
-        }
-
-        if ($this->has('form_schema') && is_string($this->form_schema)) {
-            $decoded = json_decode($this->form_schema, true);
-            if (json_last_error() === JSON_ERROR_NONE) {
-                $this->merge([
-                    'form_schema' => $decoded
                 ]);
             }
         }

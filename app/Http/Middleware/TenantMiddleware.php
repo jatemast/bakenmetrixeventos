@@ -36,6 +36,14 @@ class TenantMiddleware
                     }
                 }
             }
+            
+            // Default for the main production domain
+            if (!$tenantId && ($host === 'eventos2.soymetrix.com' || $host === 'localhost')) {
+                $tenant = \App\Models\Tenant::where('slug', 'metrix-enterprise')->first() ?: \App\Models\Tenant::first();
+                if ($tenant) {
+                    $tenantId = $tenant->id;
+                }
+            }
         }
 
         // 3. Fallback to header

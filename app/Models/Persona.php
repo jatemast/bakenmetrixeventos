@@ -7,6 +7,14 @@ use Illuminate\Support\Str;
 
 class Persona extends Model
 {
+    use \App\Traits\BelongsToTenant;
+
+    // ── Universes (Arquitectura Senior) ────────────────────────────
+    public const UNIVERSE_U1 = 'U1'; // Ya registrado en el CRM
+    public const UNIVERSE_U2 = 'U2'; // No registrado aún (transitorio → pasa a U1 al registrarse)
+    public const UNIVERSE_U3 = 'U3'; // Líder (QR específico de líder)
+    public const UNIVERSE_U4 = 'U4'; // Militante (QR específico de militante)
+
     protected $fillable = [
         'cedula',
         'region',
@@ -44,7 +52,6 @@ class Persona extends Model
         'last_interaction_at',
         'last_invited_event_id',
         'last_invited_at',
-        'region',
         'group_id',
         'tenant_id',
         'tags',
@@ -64,6 +71,7 @@ class Persona extends Model
         'metadata' => 'array',
         'cdz_expires_at' => 'datetime',
         'cdz_version' => 'integer',
+        'location' => 'array',
     ];
 
     public static function boot()
@@ -77,7 +85,65 @@ class Persona extends Model
                 $model->cdz_expires_at = now()->addYear();
                 $model->cdz_version = 1;
             }
+
+            // Default Universe Assignment
+            if (empty($model->universe_type)) {
+                $model->universe_type = self::UNIVERSE_U1;
+            }
+
+            // Auto-tagging based on Universe
+            $model->syncUniverseTags();
         });
+
+        static::updating(function ($model) {
+            if ($model->isDirty('universe_type')) {
+                $model->syncUniverseTags();
+            }
+        });
+    }
+
+    /**
+     * Promote a Prospect (U2) to Registered CRM (U1)
+     */
+    public function promoteToU1(): bool
+    {
+        if ($this->universe_type === self::UNIVERSE_U2) {
+            return $this->update([
+                'universe_type' => self::UNIVERSE_U1,
+                'metadata' => array_merge($this->metadata ?? [], [
+                    'promoted_at' => now()->toDateTimeString(),
+                    'promotion_reason' => 'registration_completed'
+                ])
+            ]);
+        }
+        return false;
+    }
+
+    /**
+     * Automatic Identification Tags based on current status (SaaS Tags)
+     */
+    public function syncUniverseTags(): void
+    {
+        $currentTags = $this->tags ?? [];
+        $universeMapping = [
+            self::UNIVERSE_U1 => 'CITIZEN_REG',
+            self::UNIVERSE_U2 => 'PROSPECT_NEW',
+            self::UNIVERSE_U3 => 'LEADER_AUTH',
+            self::UNIVERSE_U4 => 'MILITANT_VAL',
+        ];
+
+        // Remove old universe tags
+        $currentTags = array_diff($currentTags, array_values($universeMapping));
+
+        // Add new universe tag
+        if (isset($universeMapping[$this->universe_type])) {
+            $currentTags[] = $universeMapping[$this->universe_type];
+        }
+
+        $this->tags = array_values(array_unique($currentTags));
+        
+        // Also ensure universes array contains the type for legacy filter support
+        $this->universes = [$this->universe_type];
     }
 
     public function tags_directory()
@@ -85,20 +151,9 @@ class Persona extends Model
         return $this->belongsToMany(Tag::class, 'persona_tags', 'persona_id', 'tag_id');
     }
 
-    /**
-     * Universal beneficiaries for any event type (Fase 1.2)
-     */
     public function beneficiarios()
     {
         return $this->hasMany(Beneficiario::class);
-    }
-
-    /**
-     * Legacy mascotas for backward compatibility
-     */
-    public function mascotas()
-    {
-        return $this->hasMany(Mascota::class);
     }
 
     public function events()
@@ -113,8 +168,18 @@ class Persona extends Model
         return $this->hasMany(EventAttendee::class);
     }
 
-    public function bonusPointsHistory()
+    public function qrCodes()
     {
-        return $this->hasMany(BonusPointHistory::class);
+        return $this->hasMany(QrCode::class, 'persona_id');
+    }
+
+    public function leader()
+    {
+        return $this->belongsTo(Persona::class, 'leader_id');
+    }
+
+    public function subordinates()
+    {
+        return $this->hasMany(Persona::class, 'leader_id');
     }
 }

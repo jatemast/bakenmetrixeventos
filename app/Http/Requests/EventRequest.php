@@ -54,16 +54,55 @@ class EventRequest extends FormRequest
     }
 
     /**
+     * Configure the validator instance.
+     * Validate that event date falls within the campaign's date range.
+     * Auto-calculate the status based on event date if not provided.
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            if ($this->has('campaign_id') && $this->has('date') && !$validator->errors()->has('date')) {
+                $campaign = \App\Models\Campaign::find($this->campaign_id);
+                if ($campaign) {
+                    $eventDate = \Carbon\Carbon::parse($this->date);
+                    
+                    if ($campaign->start_date && $eventDate->lt(\Carbon\Carbon::parse($campaign->start_date)->startOfDay())) {
+                        $validator->errors()->add('date', 
+                            "La fecha del evento no puede ser anterior al inicio de la campaña ({$campaign->start_date->format('d/m/Y')})."
+                        );
+                    }
+                    if ($campaign->end_date && $eventDate->gt(\Carbon\Carbon::parse($campaign->end_date)->endOfDay())) {
+                        $validator->errors()->add('date', 
+                            "La fecha del evento no puede ser posterior al fin de la campaña ({$campaign->end_date->format('d/m/Y')})."
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    /**
      * Prepare the data for validation.
-     * Decode JSON strings before validation
+     * Decode JSON strings before validation (supports multipart form data)
      */
     protected function prepareForValidation()
     {
+        // Decode target_universes if sent as JSON string
         if ($this->has('target_universes') && is_string($this->target_universes)) {
             $decoded = json_decode($this->target_universes, true);
             if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
                 $this->merge([
                     'target_universes' => $decoded
+                ]);
+            }
+        }
+
+        // Decode form_schema if sent as JSON string
+        if ($this->has('form_schema') && is_string($this->form_schema)) {
+            $decoded = json_decode($this->form_schema, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $this->merge([
+                    'form_schema' => $decoded
                 ]);
             }
         }

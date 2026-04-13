@@ -26,53 +26,70 @@ class CampaignController extends Controller
      */
     public function store(CampaignRequest $request): JsonResponse
     {
-        $data = $request->validated();
-
-        $fileFields = [
-            'citizen_segmentation_file',
-            'leader_segmentation_file',
-            'militant_segmentation_file',
-        ];
-
-        $hasSegmentationFiles = false;
-        foreach ($fileFields as $field) {
-            if ($request->hasFile($field)) {
-                $filePath = $request->file($field)->store('campaign_files', 'public');
-                $data[$field] = $filePath;
-                $hasSegmentationFiles = true;
-            }
-        }
-
-        $campaign = Campaign::create($data);
-
-        // Auto-process segmentation files if any were uploaded
-        $processingStats = null;
-        if ($hasSegmentationFiles) {
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($request) {
             try {
-                $service = new CsvSegmentationService();
-                $processingStats = $service->processAllSegmentationFiles($campaign);
-                Log::info("Auto-processed CSV files for new campaign {$campaign->id}", $processingStats);
+                $data = $request->validated();
+
+                // Build file paths
+                $fileFields = [
+                    'citizen_segmentation_file',
+                    'leader_segmentation_file',
+                    'militant_segmentation_file',
+                ];
+
+                $hasSegmentationFiles = false;
+                foreach ($fileFields as $field) {
+                    if ($request->hasFile($field)) {
+                        $filePath = $request->file($field)->store('campaign_files', 'public');
+                        $data[$field] = $filePath;
+                        $hasSegmentationFiles = true;
+                    }
+                }
+
+                // SaaS: Assign tenant and creator
+                $data['tenant_id'] = app()->bound('tenant_id') ? app('tenant_id') : null;
+                $data['created_by'] = auth()->id();
+
+                $campaign = Campaign::create($data);
+
+                // Auto-process segmentation files if any were uploaded
+                $processingStats = null;
+                if ($hasSegmentationFiles) {
+                    try {
+                        $service = new CsvSegmentationService();
+                        $processingStats = $service->processAllSegmentationFiles($campaign);
+                        Log::info("Auto-processed CSV files for new campaign {$campaign->id}", $processingStats);
+                    } catch (\Exception $e) {
+                        Log::error("Error auto-processing segmentation for campaign {$campaign->id}: {$e->getMessage()}");
+                    }
+                }
+
+                // Generate militant QR codes when campaign is created
+                $militantQrStats = null;
+                try {
+                    $militantQrStats = $this->militantQrService->generateCampaignMilitantQrs($campaign);
+                    Log::info("Generated militant QR codes for campaign {$campaign->id}", $militantQrStats ?: []);
+                } catch (\Exception $e) {
+                    Log::error("Error generating militant QRs for campaign {$campaign->id}: {$e->getMessage()}");
+                }
+
+                return response()->json([
+                    'message' => 'Campaña creada exitosamente',
+                    'campaign' => $campaign,
+                    'segmentation_processing' => $processingStats,
+                    'militant_qr_generation' => $militantQrStats
+                ], 201);
+
             } catch (\Exception $e) {
-                Log::error("Error auto-processing segmentation for campaign {$campaign->id}: {$e->getMessage()}");
-                // Don't fail campaign creation if processing fails
+                \Illuminate\Support\Facades\Log::error('Campaign Creation Error: ' . $e->getMessage(), [
+                    'trace' => $e->getTraceAsString()
+                ]);
+                return response()->json([
+                    'message' => 'Error al crear la campaña',
+                    'error' => $e->getMessage()
+                ], 500);
             }
-        }
-
-        // Generate militant QR codes when campaign is created
-        $militantQrStats = null;
-        try {
-            $militantQrStats = $this->militantQrService->generateCampaignMilitantQrs($campaign);
-            Log::info("Generated militant QR codes for campaign {$campaign->id}", $militantQrStats);
-        } catch (\Exception $e) {
-            Log::error("Error generating militant QRs for campaign {$campaign->id}: {$e->getMessage()}");
-        }
-
-        return response()->json([
-            'message' => 'Campaña creada exitosamente',
-            'campaign' => $campaign,
-            'segmentation_processing' => $processingStats,
-            'militant_qr_generation' => $militantQrStats
-        ], 201);
+        });
     }
 
     /**
