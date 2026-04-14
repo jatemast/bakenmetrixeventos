@@ -30,9 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->validateCsrfTokens(except: [
-            'api/public/register',
-            'api/public/store-super-persona',
-            'api/public/*'
+            'api/*'
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

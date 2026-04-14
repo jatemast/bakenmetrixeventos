@@ -4,17 +4,14 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return response()->json([
-        'name' => config('app.name', 'Laravel'),
-        'version' => app()->version(),
-        'status' => 'active',
-        'type' => 'API',
-        'message' => 'Event Management API is running. All endpoints are available at for testing'
-    ]);
+        'status' => 'error',
+        'code' => 401,
+        'message' => 'Unauthorized: Invalid or missing authentication token.',
+        'token' => false,
+        'server_status' => 'obfuscated',
+        'timestamp' => now()->toIso8601String()
+    ], 401);
 });
-
-Route::get('/censo-oficial', function (Illuminate\Http\Request $request) {
-    return view('censo_form', ['leader_id' => $request->query('leader_id')]);
-})->name('censo.oficial');
 
 Route::get('/admin/dashboard', [\App\Http\Controllers\AdminDashboardController::class, 'index'])->name('admin.dashboard');
 Route::get('/api/admin/map-data', [\App\Http\Controllers\AdminDashboardController::class, 'getMapData'])->name('admin.map-data');
@@ -41,8 +38,4 @@ Route::get('/puntos-mi-cuenta', function (Illuminate\Http\Request $request) {
         'history' => $history
     ]);
 })->name('loyalty.score');
-
-Route::get('/censo-registro', function (Illuminate\Http\Request $request) {
-    return view('pwa_registration', ['whatsapp' => $request->query('whatsapp')]);
-})->name('pwa.registration');
 

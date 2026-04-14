@@ -22,51 +22,15 @@ class CampaignRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'nullable|string|max:255',
-            'theme' => 'nullable|string|max:255',
-            'objective' => 'nullable|string',
-            'target_citizen' => 'nullable|string|max:255',
-            'target_universes' => 'nullable|array',
-            'special_observations' => 'nullable|string',
-            'citizen_segmentation_file' => 'nullable|file|mimes:csv,pdf,xlsx,xls|max:2048',
-            'leader_segmentation_file' => 'nullable|file|mimes:csv,pdf,xlsx,xls|max:2048',
-            'militant_segmentation_file' => 'nullable|file|mimes:csv,pdf,xlsx,xls|max:2048',
-            'requesting_dependency' => 'nullable|string|max:255',
-            'campaign_manager' => 'nullable|string|max:255',
-            'email' => 'nullable|email|max:255',
-            'whatsapp' => 'nullable|string|max:20',
-            'start_date' => 'nullable|date',
-            'end_date' => 'nullable|date|after_or_equal:start_date',
-            'number_of_events' => 'nullable|integer|min:0',
-            'campaign_number' => 'nullable|integer|unique:campaigns,campaign_number',
+            'name' => 'required|string|max:255',
+            'theme' => 'required|string|max:255',
+            'requesting_dependency' => 'required|string|max:255',
+            'campaign_manager' => 'required|string|max:255',
+            'email' => 'required|email|max:255',
+            'whatsapp' => 'required|string|max:20',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
             'status' => 'nullable|string|in:draft,scheduled,active,completed,cancelled',
-            'form_schema' => 'nullable',
-            'success_message' => 'nullable|string',
         ];
-    }
-
-    /**
-     * Prepare the data for validation.
-     * Decode JSON strings before validation
-     */
-    protected function prepareForValidation()
-    {
-        if ($this->has('target_universes') && is_string($this->target_universes)) {
-            $decoded = json_decode($this->target_universes, true);
-            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                $this->merge([
-                    'target_universes' => $decoded
-                ]);
-            }
-        }
-
-        if ($this->has('form_schema') && is_string($this->form_schema)) {
-            $decoded = json_decode($this->form_schema, true);
-            if (json_last_error() === JSON_ERROR_NONE) {
-                $this->merge([
-                    'form_schema' => $decoded
-                ]);
-            }
-        }
     }
 }

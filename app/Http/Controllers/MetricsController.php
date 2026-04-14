@@ -210,4 +210,60 @@ class MetricsController extends Controller
                 ->get(['id', 'detail', 'checked_in_count', 'max_capacity'])
         ]);
     }
+
+    /**
+     * Métricas de Invitaciones (WhatsApp Broadcast)
+     * Proporciona estadísticas de envío por estado, municipio y estado de entrega.
+     */
+    public function invitationMetrics(int $campaignId): JsonResponse
+    {
+        // 1. Estadísticas Agrupadas por Ubicación y Estado
+        $locationStats = DB::table('invitations')
+            ->join('events', 'invitations.event_id', '=', 'events.id')
+            ->join('personas', 'invitations.persona_id', '=', 'personas.id')
+            ->where('events.campaign_id', $campaignId)
+            ->selectRaw("
+                personas.estado as location_state, 
+                personas.municipio as location_city,
+                invitations.status, 
+                COUNT(*) as total
+            ")
+            ->groupBy('personas.estado', 'personas.municipio', 'invitations.status')
+            ->get();
+
+        // 2. Historial Reciente de Envíos
+        $recentInvitations = DB::table('invitations')
+            ->join('events', 'invitations.event_id', '=', 'events.id')
+            ->join('personas', 'invitations.persona_id', '=', 'personas.id')
+            ->where('events.campaign_id', $campaignId)
+            ->select([
+                'personas.nombre', 
+                'personas.apellido_paterno', 
+                'personas.numero_celular', 
+                'personas.estado', 
+                'personas.municipio',
+                'invitations.status', 
+                'invitations.created_at', 
+                'events.detail as event_name'
+            ])
+            ->orderBy('invitations.created_at', 'desc')
+            ->limit(100)
+            ->get();
+
+        // 3. Resumen por Estado de Envío
+        $summary = DB::table('invitations')
+            ->join('events', 'invitations.event_id', '=', 'events.id')
+            ->where('events.campaign_id', $campaignId)
+            ->selectRaw("status, COUNT(*) as count")
+            ->groupBy('status')
+            ->pluck('count', 'status');
+
+        return response()->json([
+            'success' => true,
+            'campaign_id' => $campaignId,
+            'summary' => $summary,
+            'location_stats' => $locationStats,
+            'recent' => $recentInvitations
+        ]);
+    }
 }
