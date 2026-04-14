@@ -43,7 +43,51 @@ class EventController extends Controller
                 $data['pdf_path'] = $filePath;
             }
 
+            // Decode form_schema if sent as JSON string
+            if (isset($data['form_schema']) && is_string($data['form_schema'])) {
+                $decoded = json_decode($data['form_schema'], true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $data['form_schema'] = $decoded;
+                }
+            }
+
             $event = Event::create($data);
+
+            // ── Auto-apply contextual template from EventType ──────────────
+            // If no custom form_schema was provided, inherit from EventType
+            $eventType = $event->eventType;
+            if ($eventType) {
+                $templateUpdates = [];
+
+                // Inherit form_schema from template if event doesn't have its own
+                if (empty($data['form_schema']) && !empty($eventType->default_form_schema)) {
+                    $templateUpdates['form_schema'] = $eventType->default_form_schema;
+                }
+
+                // Inherit success_message from template if not set
+                if (empty($data['success_message']) && !empty($eventType->success_message)) {
+                    $templateUpdates['success_message'] = $eventType->success_message;
+                }
+
+                // Auto-apply points configuration from template if not explicitly set
+                if (!empty($eventType->default_points_config)) {
+                    $pointsConfig = $eventType->default_points_config;
+                    if (empty($data['bonus_points_for_attendee']) && isset($pointsConfig['attendee'])) {
+                        $templateUpdates['bonus_points_for_attendee'] = $pointsConfig['attendee'];
+                    }
+                    if (empty($data['bonus_points_for_leader']) && isset($pointsConfig['leader'])) {
+                        $templateUpdates['bonus_points_for_leader'] = $pointsConfig['leader'];
+                    }
+                    if (empty($data['bonus_points_per_referral']) && isset($pointsConfig['referral'])) {
+                        $templateUpdates['bonus_points_per_referral'] = $pointsConfig['referral'];
+                    }
+                }
+
+                if (!empty($templateUpdates)) {
+                    $event->update($templateUpdates);
+                    Log::info("Applied contextual template from EventType '{$eventType->name}' to event {$event->id}", array_keys($templateUpdates));
+                }
+            }
 
             // Auto-generate QR codes for the event
             $generatedQrs = $this->qrCodeService->generateEventQrCodes($event);
@@ -86,10 +130,17 @@ class EventController extends Controller
                 $this->militantQrService->generateEventMilitantQrs($event);
             }
 
+            // Sync tags if provided
+            if ($request->has('tag_ids')) {
+                $event->tags()->sync($request->input('tag_ids'));
+            }
+
             DB::commit();
 
-            // Trigger n8n Invitation Workflow
-            $this->triggerN8nWorkflow($event);
+            if ($request->input('send_invitations')) {
+                // Trigger n8n Invitation Workflow
+                $this->triggerN8nWorkflow($event);
+            }
 
             \Illuminate\Support\Facades\Cache::flush();
 
@@ -124,20 +175,36 @@ class EventController extends Controller
         }
 
         try {
+            // Reload event with campaign, eventType and tags for full context
+            $event->load(['campaign', 'eventType', 'tags']);
+            $tagNames = $event->tags->pluck('name')->toArray();
+
             Http::timeout(10)->post($webhookUrl, [
                 'message_type' => 'event_invitation',
                 'event_id' => $event->id,
                 'campaign_id' => $event->campaign_id,
+                'event_detail' => $event->detail,
+                'event_date' => $event->date,
+                'event_time' => $event->time,
+                'event_location' => trim("{$event->street} {$event->number}, {$event->neighborhood}, {$event->municipality}"),
+                'form_schema' => $event->form_schema,
+                'success_message' => $event->success_message,
+                'event_type' => $event->eventType?->name,
+                'campaign_name' => $event->campaign?->name,
                 'filters' => [
                     'municipio' => $event->municipality ?? '',
                     'colonia' => $event->neighborhood ?? '',
                     'universe' => is_array($event->target_universes) ? implode(',', $event->target_universes) : '',
+                    'gender' => $event->gender_target ?? 'Ambos',
+                    'min_age' => $event->min_age ?? 0,
+                    'max_age' => $event->max_age ?? 100,
+                    'tags' => $tagNames,
                 ],
                 'api_base_url' => config('app.url') . '/api',
                 'timestamp' => now()->toIso8601String(),
             ]);
 
-            Log::info("FLOW 7 broadcast triggered for event {$event->id}");
+            Log::info("FLOW 7 broadcast triggered for event {$event->id} with form_schema and success_message");
         } catch (\Exception $e) {
             Log::error('Failed to trigger FLOW 7 broadcast: ' . $e->getMessage());
         }
@@ -207,6 +274,11 @@ class EventController extends Controller
         }
 
         $event->update($data);
+
+        // Sync tags if provided
+        if ($request->has('tag_ids')) {
+            $event->tags()->sync($request->input('tag_ids'));
+        }
         \Illuminate\Support\Facades\Cache::flush();
 
         return response()->json([
@@ -248,13 +320,31 @@ class EventController extends Controller
      */
     public function showPublic(string $code): JsonResponse
     {
+        // 1. Try direct columns (fastest)
         $event = Event::where('checkin_code', $code)
             ->orWhere('checkout_code', $code)
             ->with('campaign')
-            ->firstOrFail();
+            ->first();
+
+        // 2. Fallback: Search the qr_codes table
+        if (!$event) {
+            $qrCode = QrCode::where('code', $code)->with('event.campaign')->first();
+            if ($qrCode && $qrCode->event) {
+                $event = $qrCode->event;
+                $event->temp_leader_id = $qrCode->leader_id;
+            }
+        }
+
+        if (!$event) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Código de evento no encontrado'
+            ], 404);
+        }
 
         return response()->json([
             'event' => $event,
+            'leader_id' => $event->temp_leader_id ?? null,
             'bonus_points_for_attendee' => $event->bonus_points_for_attendee ?? 0,
             'bonus_points_for_leader' => $event->bonus_points_for_leader ?? 0
         ]);
@@ -307,11 +397,40 @@ class EventController extends Controller
 
         $personas = $query->paginate($request->input('per_page', 100));
 
+        // 4. Attach Event and Leader Specific QRs for n8n to send
+        $personas->getCollection()->transform(function($persona) use ($event) {
+            $leaderQr = null;
+            if ($persona->is_leader && $persona->universe_type === 'U3') {
+                $qr = \App\Models\QrCode::where('event_id', $event->id)
+                    ->where('leader_id', $persona->id)
+                    ->where('type', 'QR2-L')
+                    ->first();
+                $leaderQr = $qr ? $qr->code : null;
+            }
+            
+            $persona->invitation_data = [
+                'event_detail' => $event->detail,
+                'event_date' => $event->date,
+                'event_time' => $event->time,
+                'event_location' => $event->street . ' ' . $event->number . ', ' . $event->neighborhood,
+                'checkin_code' => $event->checkin_code,
+                'checkout_code' => $event->checkout_code,
+                'leader_qr_code' => $leaderQr,
+                'leader_invitation_url' => $leaderQr ? url("/invitation/{$leaderQr}") : null,
+                'personal_checkin_url' => url("/events/public/{$event->checkin_code}"),
+                'personal_checkout_url' => url("/events/checkout/{$event->checkout_code}"),
+            ];
+            
+            return $persona;
+        });
+
         return response()->json([
             'success' => true,
             'event' => [
                 'id' => $event->id,
                 'detail' => $event->detail,
+                'checkin_code' => $event->checkin_code,
+                'checkout_code' => $event->checkout_code,
                 'location' => [
                     'municipality' => $event->municipality,
                     'neighborhood' => $event->neighborhood,
@@ -388,30 +507,68 @@ class EventController extends Controller
      */
     public function sendEventInvitations(string $id, Request $request): JsonResponse
     {
-        $event = Event::findOrFail($id);
+        $event = Event::with('tags')->findOrFail($id);
+        $tagNames = $event->tags->pluck('name')->toArray();
         
-        $webhookUrl = config('services.n8n.webhook_flow4_url');
+        $webhookUrl = config('services.n8n.webhook_flow7_broadcast_url');
 
         if (!$webhookUrl) {
             return response()->json(['success' => false, 'message' => 'n8n notification URL not configured'], 500);
         }
 
         try {
+            // Priority 1: Direct specialized notification for Leaders (U3)
+            // They need their personal QRs AND their unique guest registration link
+            if ($event->target_universes && in_array('U3', $event->target_universes)) {
+                $leaders = \App\Models\Persona::where('universe_type', 'U3')
+                    ->where('is_leader', true)
+                    ->where('municipio', 'like', "%{$event->municipality}%")
+                    ->get();
+                
+                $whatsappService = app(\App\Services\WhatsAppNotificationService::class);
+                foreach ($leaders as $leader) {
+                    $qr = \App\Models\QrCode::where('event_id', $event->id)
+                        ->where('leader_id', $leader->id)
+                        ->where('type', 'QR2-L')
+                        ->first();
+                    
+                    if ($qr) {
+                        try {
+                            $whatsappService->sendLeaderEventInvitation($leader, $event, $qr->code);
+                        } catch (\Exception $e) {
+                            Log::warning("Could not invite leader {$leader->id}: " . $e->getMessage());
+                        }
+                    }
+                }
+            }
+
             // Proclivity filters based on event's own data
             $filters = [
                 'municipio' => $event->municipality,
                 'colonia' => $event->neighborhood,
-                'universe' => $event->target_universes,
+                'universe' => array_diff($event->target_universes ?: [], ['U3']), // Exclude U3 from mass broadcast as they were notified above
+                'gender' => $event->gender_target,
+                'min_age' => $event->min_age,
+                'max_age' => $event->max_age,
+                'tags' => $tagNames,
             ];
 
-            Http::post($webhookUrl, [
-                'message_type' => 'event_broadcast',
-                'event_id' => $event->id,
-                'campaign_id' => $event->campaign_id,
-                'filters' => $filters,
-                'api_base_url' => config('app.url') . '/api',
-                'timestamp' => now()->toIso8601String(),
-            ]);
+            // Disparo asíncrono simulado: Si n8n tarda o da timeout, 
+            // no bloqueamos al usuario porque el proceso ya inició.
+            try {
+                Http::timeout(3)->post($webhookUrl, [
+                    'message_type' => 'event_broadcast',
+                    'event_id' => $event->id,
+                    'campaign_id' => $event->campaign_id,
+                    'filters' => $filters,
+                    'event_type' => $event->eventType?->name,
+                    'api_base_url' => config('app.url') . '/api',
+                    'timestamp' => now()->toIso8601String(),
+                ]);
+            } catch (\Exception $e) {
+                // Si hay timeout, lo ignoramos porque n8n ya recibió el webhook
+                \Log::info("N8N respondió lento pero la invitación fue enviada: " . $e->getMessage());
+            }
 
             return response()->json([
                 'success' => true,
@@ -495,7 +652,7 @@ class EventController extends Controller
      */
     protected function triggerFeedbackWorkflow(Event $event)
     {
-        $webhookUrl = config('services.n8n.webhook_flow11_feedback_url') ?? 'https://n8n.soymetrix.com/webhook/event-end-feedback-enterprise';
+        $webhookUrl = config('services.n8n.webhook_flow11_feedback_url');
 
         try {
             // Load attendees that checked in
@@ -517,5 +674,16 @@ class EventController extends Controller
         } catch (\Exception $e) {
             Log::error('Failed to trigger FLOW 11 feedback: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Get all available tags for event segmentation.
+     */
+    public function getAllTags(): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => \App\Models\Tag::all()
+        ]);
     }
 }
