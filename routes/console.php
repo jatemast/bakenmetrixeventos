@@ -49,3 +49,12 @@ Schedule::command('events:distribute-points')
     ->onFailure(function () {
         error('Points distribution failed');
     });
+
+// Auto-update event and campaign statuses (scheduled → active → completed)
+Schedule::command('events:update-status')
+    ->everyThirtyMinutes()
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->onSuccess(function () {
+        info('Event status auto-update completed');
+    });

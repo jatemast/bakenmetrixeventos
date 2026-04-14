@@ -3,26 +3,34 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Str;
 
 class Tag extends Model
 {
-    protected $primaryKey = 'tag_id';
-    
-    protected $fillable = [
-        'nombre',
-        'slug',
-        'categoria'
-    ];
+    protected $fillable = ['name', 'slug', 'type', 'color'];
 
-    public static function boot()
+    protected static function boot()
     {
         parent::boot();
-        static::creating(fn($m) => $m->slug = $m->slug ?? Str::slug($m->nombre));
+        static::creating(function ($tag) {
+            $tag->slug = $tag->slug ?? Str::slug($tag->name);
+        });
     }
 
-    public function personas()
+    /**
+     * Get all personas that are assigned this tag.
+     */
+    public function personas(): MorphToMany
     {
-        return $this->belongsToMany(Persona::class, 'persona_tags', 'tag_id', 'persona_id');
+        return $this->morphedByMany(Persona::class, 'taggable');
+    }
+
+    /**
+     * Get all events that are assigned this tag.
+     */
+    public function events(): MorphToMany
+    {
+        return $this->morphedByMany(Event::class, 'taggable');
     }
 }
