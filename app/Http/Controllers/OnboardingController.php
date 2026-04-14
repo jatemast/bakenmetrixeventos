@@ -46,6 +46,7 @@ class OnboardingController extends Controller
             'estado'           => 'nullable|string',
             'seccion'          => 'nullable|string',
             'region'           => 'nullable|string',
+            'ref'              => 'nullable|string', // El código del líder (ej: LDR-X82J)
         ]);
 
         try {
@@ -83,6 +84,12 @@ class OnboardingController extends Controller
                 'tenant_id'        => $validatedData['tenant_id'],
                 'universe_type'    => $universeType,
                 'is_leader'        => $universeType === Persona::UNIVERSE_U3,
+                
+                // Atribución de Líder
+                'leader_id'        => isset($validatedData['ref']) 
+                    ? Persona::where('referral_code', $validatedData['ref'])->value('id') 
+                    : null,
+
                 'nombre'           => $validatedData['nombre'],
                 'apellido_paterno' => $validatedData['apellido_paterno'],
                 'apellido_materno' => $validatedData['apellido_materno'] ?? null,
@@ -161,7 +168,7 @@ class OnboardingController extends Controller
                 'tag'      => 'MILITANT_VAL',
             ],
             'leader' => [
-                'label'    => 'Registro de Líder',
+                'label'    => 'Activación de Líder',
                 'universe' => 'U3',
                 'url'      => "{$baseUrl}/registro/lider?tid={$tenant_id}",
                 'tag'      => 'LEADER_AUTH',

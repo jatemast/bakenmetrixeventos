@@ -48,6 +48,7 @@ class Persona extends Model
         'loyalty_balance',
         'universe_type',
         'leader_id',
+        'sub_type',
         'last_interacted_event_id',
         'last_interaction_at',
         'last_invited_event_id',
@@ -63,6 +64,8 @@ class Persona extends Model
         'cdz_expires_at',
         'cdz_version',
     ];
+
+    protected $appends = ['relational_tags'];
 
     protected $casts = [
         'is_leader' => 'boolean',
@@ -91,13 +94,28 @@ class Persona extends Model
                 $model->universe_type = self::UNIVERSE_U1;
             }
 
-            // Auto-tagging based on Universe
+            // --- REFERRAL CODE FOR LEADERS ---
+            if ($model->universe_type === self::UNIVERSE_U3 && empty($model->referral_code)) {
+                $model->referral_code = 'LDR-' . strtoupper(Str::random(6));
+            }
+
+        // Auto-tagging based on Universe
             $model->syncUniverseTags();
+        });
+
+        static::created(function ($model) {
+            $model->syncRelationalTags();
         });
 
         static::updating(function ($model) {
             if ($model->isDirty('universe_type')) {
                 $model->syncUniverseTags();
+            }
+        });
+
+        static::updated(function ($model) {
+            if ($model->isDirty('tags')) {
+                $model->syncRelationalTags();
             }
         });
     }
@@ -140,15 +158,57 @@ class Persona extends Model
             $currentTags[] = $universeMapping[$this->universe_type];
         }
 
+        // --- AUTOMATIC AGE-BASED TAGGING ---
+        if ($this->edad > 0) {
+            if ($this->edad >= 18 && $this->edad < 30) {
+                $currentTags[] = 'JOVEN (>18)';
+            } elseif ($this->edad >= 30 && $this->edad < 60) {
+                $currentTags[] = 'ADULTO';
+            } elseif ($this->edad >= 60) {
+                $currentTags[] = 'ADULTO MAYOR';
+            } else {
+                $currentTags[] = 'MENOR DE EDAD';
+            }
+        }
+
         $this->tags = array_values(array_unique($currentTags));
         
         // Also ensure universes array contains the type for legacy filter support
         $this->universes = [$this->universe_type];
     }
 
-    public function tags_directory()
+    public function tags(): \Illuminate\Database\Eloquent\Relations\MorphToMany
     {
-        return $this->belongsToMany(Tag::class, 'persona_tags', 'persona_id', 'tag_id');
+        return $this->morphToMany(Tag::class, 'taggable');
+    }
+
+    /**
+     * Sync the relational tags table with the JSON 'tags' column
+     * This ensures no redundancy and centralizes the tagging system.
+     */
+    public function syncRelationalTags(): void
+    {
+        $tagNames = $this->tags ?? [];
+        if (empty($tagNames)) {
+            $this->tags()->detach();
+            return;
+        }
+
+        $tagIds = [];
+        foreach ($tagNames as $name) {
+            $tag = Tag::firstOrCreate(
+                ['name' => $name],
+                ['slug' => \Illuminate\Support\Str::slug($name), 'type' => 'general']
+            );
+            $tagIds[] = $tag->id;
+        }
+
+        $this->tags()->sync($tagIds);
+    }
+
+    public function getRelationalTagsAttribute()
+    {
+        return $this->tags()->get();
     }
 
     public function beneficiarios()

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class PublicRegistrationController extends Controller
@@ -290,6 +291,7 @@ class PublicRegistrationController extends Controller
         $validator = Validator::make($input, [
             'event_id' => 'required|exists:events,id',
             'persona_id' => 'nullable|exists:personas,id',
+            'leader_id' => 'nullable|exists:personas,id',
             'whatsapp_number' => 'required_without:persona_id|string',
             'name' => 'required_without:persona_id|string|max:255',
             'last_name' => 'required_without:persona_id|string|max:255',
@@ -328,9 +330,8 @@ class PublicRegistrationController extends Controller
                         'colonia' => '',
                         'codigo_postal' => '',
                         'municipio' => '',
-                        'estado' => '',
                         'numero_celular' => $whatsappNumber,
-                        'numero_telefono' => $whatsappNumber,
+                        'numero_telefono' => null, // Evitar duplicidad innecesaria
                         'email' => null,
                         'universe_type' => 'U1',
                         'universe_group' => 'I',
@@ -357,6 +358,7 @@ class PublicRegistrationController extends Controller
             // Create attendee record
             $attendee = $event->attendees()->create([
                 'persona_id' => $persona->id,
+                'leader_id' => $request->leader_id,
                 'check_in_time' => null,
                 'check_out_time' => null,
                 'bonus_points' => 0,
@@ -366,14 +368,27 @@ class PublicRegistrationController extends Controller
             // Check if capacity reached 80% (FLOW 12)
             $this->check80PercentCapacity($event);
 
+            // Trigger WhatsApp confirmation with QRs
+            try {
+                $whatsappService = app(\App\Services\WhatsAppNotificationService::class);
+                $whatsappService->sendEventQrs($persona, $event);
+            } catch (\Exception $e) {
+                Log::warning('Could not send event QRs via WhatsApp: ' . $e->getMessage());
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Successfully registered for event!',
                 'event' => [
                     'id' => $event->id,
-                    'name' => $event->nombre,
-                    'date' => $event->fecha,
-                    'location' => $event->ubicacion,
+                    'name' => $event->detail,
+                    'date' => $event->date,
+                    'time' => $event->time,
+                    'location' => $event->street . ', ' . $event->neighborhood,
+                    'checkin_code' => $event->checkin_code,
+                    'checkout_code' => $event->checkout_code,
+                    'checkin_qr_url' => "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" . ($event->checkin_code),
+                    'checkout_qr_url' => "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" . ($event->checkout_code),
                 ],
                 'attendee' => $attendee,
                 'persona' => [
@@ -690,193 +705,207 @@ class PublicRegistrationController extends Controller
      */
     public function storeSuperPersona(Request $request)
     {
-        // Alias support for CRM standardization
-        if (!$request->has('whatsapp') && $request->has('whatsapp_number')) {
-            $request->merge(['whatsapp' => $request->whatsapp_number]);
-        }
-
-        $validated = $request->validate([
-            'whatsapp' => 'required|string',
-            'curp' => 'nullable|string|max:18',
-            'clave_elector' => 'nullable|string|max:18',
-            'seccion' => 'nullable|string|max:10',
-            'vigencia' => 'nullable|string|max:4',
-            'tipo_sangre' => 'nullable|string|max:5',
-            'cedula' => 'nullable|string|max:50',
-            'nombre' => 'required|string',
-            'apellido_paterno' => 'nullable|string|max:255',
-            'apellido_materno' => 'nullable|string|max:255',
-            'edad' => 'nullable|integer',
-            'sexo' => 'nullable|in:H,M,O',
-            'email' => 'nullable|email',
-            'calle' => 'nullable|string|max:255',
-            'numero_exterior' => 'nullable|string|max:50',
-            'numero_interior' => 'nullable|string|max:50',
-            'colonia' => 'nullable|string|max:255',
-            'codigo_postal' => 'nullable|string|max:10',
-            'municipio' => 'nullable|string|max:255',
-            'estado' => 'nullable|string|max:255',
-            'latitude' => 'nullable|numeric',
-            'longitude' => 'nullable|numeric',
-            'categoria' => 'nullable|string|max:255',
-            'tarifa' => 'nullable|string|max:255',
-            'servicios' => 'nullable|string|max:255',
-            'tags' => 'nullable|array',
-            'universes' => 'nullable|array',
-            'metadata' => 'nullable|array',
-            'notes' => 'nullable|string',
-            'leader_id' => 'nullable|exists:personas,id',
-            'tenant_id' => 'nullable|exists:tenants,id'
-        ]);
-
-        $whatsapp = $this->normalizePhoneNumber($validated['whatsapp']);
-
-        // Robustness: Check for unique constraints before updateOrCreate to provide better error messages
-        // Fields with UNIQUE constraints: curp, email, cedula, clave_elector, codigo_ciudadano
-        $duplicates = [];
-        
-        if (!empty($validated['curp'])) {
-            $dup = Persona::where('curp', $validated['curp'])->where('numero_celular', '!=', $whatsapp)->exists();
-            if ($dup) $duplicates[] = 'El CURP ya está registrado con otro número.';
-        }
-
-        if (!empty($validated['email'])) {
-            $dup = Persona::where('email', $validated['email'])->where('numero_celular', '!=', $whatsapp)->exists();
-            if ($dup) $duplicates[] = 'El correo electrónico ya está registrado con otro número.';
-        }
-
-        if (!empty($validated['clave_elector'])) {
-            $dup = Persona::where('clave_elector', $validated['clave_elector'])->where('numero_celular', '!=', $whatsapp)->exists();
-            if ($dup) $duplicates[] = 'La Clave de Elector ya está registrada con otro número.';
-        }
-
-        if (!empty($validated['cedula'])) {
-            $dup = Persona::where('cedula', $validated['cedula'])->where('numero_celular', '!=', $whatsapp)->exists();
-            if ($dup) $duplicates[] = 'El número de Cédula/Identificación ya está registrado con otro número.';
-        }
-
-        if (count($duplicates) > 0) {
-            return response()->json([
-                'success' => false,
-                'message' => implode(' ', $duplicates),
-                'error_code' => 'DUPLICATE_ENTRY',
-                'errors' => $duplicates
-            ], 422);
-        }
-
-        $personaData = [
-            'curp' => $validated['curp'] ?? null,
-            'clave_elector' => $validated['clave_elector'] ?? null,
-            'seccion' => $validated['seccion'] ?? null,
-            'vigencia' => $validated['vigencia'] ?? null,
-            'tipo_sangre' => $validated['tipo_sangre'] ?? null,
-            'categoria' => $validated['categoria'] ?? null,
-            'tarifa' => $validated['tarifa'] ?? null,
-            'servicios' => $validated['servicios'] ?? null,
-            'cedula' => !empty($validated['cedula']) ? $validated['cedula'] : ('ID-' . \Illuminate\Support\Str::random(10)),
-            'nombre' => $validated['nombre'],
-            'apellido_paterno' => $validated['apellido_paterno'] ?? '',
-            'apellido_materno' => $validated['apellido_materno'] ?? '',
-            'edad' => $validated['edad'] ?? 0,
-        ];
-
-        // --- SMART NAME SPLICING ---
-        // If paterno has multiple words and materno is empty, split them
-        if (!empty($personaData['apellido_paterno']) && empty($personaData['apellido_materno'])) {
-            $parts = explode(' ', trim($personaData['apellido_paterno']));
-            if (count($parts) >= 2) {
-                $personaData['apellido_paterno'] = $parts[0];
-                $personaData['apellido_materno'] = implode(' ', array_slice($parts, 1));
+        try {
+            // Alias support for CRM standardization
+            if (!$request->has('whatsapp') && $request->has('whatsapp_number')) {
+                $request->merge(['whatsapp' => $request->whatsapp_number]);
             }
-        }
-        // If only nombre is provided and has multiple words, try to extract surnames
-        if (empty($personaData['apellido_paterno']) && empty($personaData['apellido_materno'])) {
-            $nameParts = explode(' ', trim($personaData['nombre']));
-            if (count($nameParts) >= 3) {
-                // Assume Firstname, FatherSurname, MotherSurname
-                $personaData['nombre'] = $nameParts[0];
-                $personaData['apellido_paterno'] = $nameParts[1];
-                $personaData['apellido_materno'] = implode(' ', array_slice($nameParts, 2));
-            } elseif (count($nameParts) === 2) {
-                // Assume Firstname, FatherSurname
-                $personaData['nombre'] = $nameParts[0];
-                $personaData['apellido_paterno'] = $nameParts[1];
+
+            $tenantIdInput = $request->input('tenant_id');
+            // Postgres Fix: Si el ID no es un UUID válido, lo ignoramos para evitar el error 22P02
+            if ($tenantIdInput && !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $tenantIdInput)) {
+                $request->merge(['tenant_id' => null]);
             }
-        }
 
-            try {
-                $persona = Persona::updateOrCreate(
-                    ['numero_celular' => $whatsapp],
-                    array_merge($personaData, [
-                        'sexo' => $validated['sexo'] ?? 'O',
-                        'email' => $validated['email'] ?? null,
-                        'calle' => $validated['calle'] ?? '',
-                        'numero_exterior' => $validated['numero_exterior'] ?? '',
-                        'numero_interior' => $validated['numero_interior'] ?? '',
-                        'colonia' => $validated['colonia'] ?? '',
-                        'codigo_postal' => $validated['codigo_postal'] ?? '',
-                        'municipio' => $validated['municipio'] ?? '',
-                        'estado' => $validated['estado'] ?? 'Querétaro',
-                        'region' => '',
-                        'numero_telefono' => $whatsapp,
-                        'universe_type' => 'U1',
-                        'universe_group' => 'I',
-                        'is_leader' => false,
-                        'loyalty_balance' => 0,
-                        'tags' => $validated['tags'] ?? [],
-                        'universes' => $validated['universes'] ?? [],
-                        'metadata' => $validated['metadata'] ?? [],
-                        'notes' => $validated['notes'] ?? null,
-                        'leader_id' => $validated['leader_id'] ?? null,
-                        'updated_at' => now(),
-                        'tenant_id' => $validated['tenant_id'] ?? (app()->bound('tenant_id') ? app('tenant_id') : \App\Models\Tenant::first()?->id)
-                    ])
-                );
+            $validated = $request->validate([
+                'whatsapp' => 'required|string',
+                'numero_telefono' => 'nullable|string',
+                'curp' => 'nullable|string|max:18',
+                'clave_elector' => 'nullable|string|max:18',
+                'seccion' => 'nullable|string|max:10',
+                'vigencia' => 'nullable|string|max:4',
+                'tipo_sangre' => 'nullable|string|max:5',
+                'cedula' => 'nullable|string|max:50',
+                'nombre' => 'required|string',
+                'apellido_paterno' => 'nullable|string|max:255',
+                'apellido_materno' => 'nullable|string|max:255',
+                'edad' => 'nullable|integer',
+                'sexo' => 'nullable|in:H,M,O',
+                'email' => 'nullable|email',
+                'calle' => 'nullable|string|max:255',
+                'numero_exterior' => 'nullable|string|max:50',
+                'numero_interior' => 'nullable|string|max:50',
+                'colonia' => 'nullable|string|max:255',
+                'codigo_postal' => 'nullable|string|max:10',
+                'municipio' => 'nullable|string|max:255',
+                'estado' => 'nullable|string|max:255',
+                'latitude' => 'nullable|numeric',
+                'longitude' => 'nullable|numeric',
+                'categoria' => 'nullable|string|max:255',
+                'tarifa' => 'nullable|string|max:255',
+                'servicios' => 'nullable|string|max:255',
+                'tags' => 'nullable|array',
+                'universes' => 'nullable|array',
+                'metadata' => 'nullable|array',
+                'notes' => 'nullable|string',
+                'leader_id' => 'nullable|exists:personas,id',
+                'tenant_id' => 'nullable', 
+                'universe_type' => 'nullable|string|in:U1,U2,U3,U4',
+                'sub_type' => 'nullable|string|max:255',
+                'universe_group' => 'nullable|string|max:10',
+                'region' => 'nullable|string|max:255',
+                'cdz_version' => 'nullable|string|max:10',
+                'cdz_expires_at' => 'nullable|date',
+                'loyalty_balance' => 'nullable|integer'
+            ]);
 
-                // Actualizar Geo (PostGIS) si hay coordenadas
-                if (!empty($validated['latitude']) && !empty($validated['longitude'])) {
-                    try {
-                        $lat = $validated['latitude'];
-                        $lng = $validated['longitude'];
-                        
-                        DB::table('personas')
-                            ->where('id', $persona->id)
-                            ->update([
-                                'location' => DB::raw("ST_SetSRID(ST_MakePoint($lng, $lat), 4326)")
-                            ]);
-                    } catch (\Exception $geoEx) {
-                        Log::warning('PostGIS location update failed (likely restricted by DB driver): ' . $geoEx->getMessage());
-                    }
-                }
+            $whatsapp = $this->normalizePhoneNumber($validated['whatsapp']);
 
-                // Si es un Censo 100% Nuevo, enviarle el Mensaje Inmediato por WhatsApp
-                if ($persona->wasRecentlyCreated) {
-                    try {
-                        $wspservice = app(\App\Services\WhatsAppNotificationService::class);
-                        $wspservice->sendGreetingNewCitizen($persona);
-                    } catch (\Exception $e) {
-                        Log::warning('WhatsApp greeting failed: ' . $e->getMessage());
-                    }
-                }
+            // Resolve redundant phone number
+            $alternatePhone = !empty($validated['numero_telefono']) 
+                ? $this->normalizePhoneNumber($validated['numero_telefono']) 
+                : null;
 
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Universo del Ciudadano ' . $persona->nombre . ' actualizado en 360°',
-                    'persona_id' => $persona->id
-                ]);
+            // If same as primary, don't store as alternate
+            if ($alternatePhone === $whatsapp) {
+                $alternatePhone = null;
+            }
 
-            } catch (\Exception $e) {
-                Log::error('SuperPersona Storage Error: ' . $e->getMessage(), [
-                    'whatsapp' => $whatsapp,
-                    'exception' => $e
-                ]);
-                
+            // Robustness: Check for unique constraints across ALL tenants
+            $duplicates = [];
+            
+            if (!empty($validated['curp'])) {
+                $dup = Persona::withoutGlobalScopes()->where('curp', $validated['curp'])->where('numero_celular', '!=', $whatsapp)->exists();
+                if ($dup) $duplicates[] = 'El CURP ya está registrado con otro número.';
+            }
+
+            if (!empty($validated['email'])) {
+                $dup = Persona::withoutGlobalScopes()->where('email', $validated['email'])->where('numero_celular', '!=', $whatsapp)->exists();
+                if ($dup) $duplicates[] = 'El correo electrónico ya está registrado con otro número.';
+            }
+
+            if (count($duplicates) > 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Error al guardar en la base de datos: ' . $e->getMessage()
-                ], 500);
+                    'message' => implode(' ', $duplicates),
+                    'error_code' => 'DUPLICATE_ENTRY',
+                    'errors' => $duplicates
+                ], 422);
             }
+
+            $personaData = [
+                'curp' => $validated['curp'] ?? null,
+                'clave_elector' => $validated['clave_elector'] ?? null,
+                'seccion' => $validated['seccion'] ?? null,
+                'cdz_expires_at' => $validated['vigencia'] ?? null,
+                'tipo_sangre' => $validated['tipo_sangre'] ?? null,
+                'categoria' => $validated['categoria'] ?? null,
+                'tarifa' => $validated['tarifa'] ?? null,
+                'servicios' => $validated['servicios'] ?? null,
+                'cedula' => !empty($validated['cedula']) ? $validated['cedula'] : ('ID-' . \Illuminate\Support\Str::random(10)),
+                'nombre' => $validated['nombre'],
+                'apellido_paterno' => $validated['apellido_paterno'] ?? '',
+                'apellido_materno' => $validated['apellido_materno'] ?? '',
+                'edad' => $validated['edad'] ?? 0,
+                'region' => $validated['region'] ?? '',
+                'universe_group' => $validated['universe_group'] ?? 'I',
+                'sub_type' => $validated['sub_type'] ?? null,
+                'cdz_version' => $validated['cdz_version'] ?? '1',
+            ];
+
+            // Smart Name Splicing safety
+            if (!empty($personaData['apellido_paterno']) && empty($personaData['apellido_materno'])) {
+                $parts = explode(' ', trim((string)$personaData['apellido_paterno']));
+                if (count($parts) >= 2) {
+                    $personaData['apellido_paterno'] = $parts[0];
+                    $personaData['apellido_materno'] = implode(' ', array_slice($parts, 1));
+                }
+            }
+
+            $personaUpdateData = array_merge($personaData, [
+                'sexo' => $validated['sexo'] ?? 'O',
+                'email' => $validated['email'] ?? null,
+                'calle' => $validated['calle'] ?? '',
+                'numero_exterior' => $validated['numero_exterior'] ?? '',
+                'numero_interior' => $validated['numero_interior'] ?? '',
+                'colonia' => $validated['colonia'] ?? '',
+                'codigo_postal' => $validated['codigo_postal'] ?? '',
+                'municipio' => $validated['municipio'] ?? '',
+                'estado' => $validated['estado'] ?? '',
+                'numero_telefono' => $alternatePhone, // Fix redundancy
+                'universe_type' => $validated['universe_type'] ?? 'U1',
+                'is_leader' => ($validated['universe_type'] ?? 'U1') === 'U3',
+                'tags' => $validated['tags'] ?? [],
+                'universes' => $validated['universes'] ?? [$validated['universe_type'] ?? 'U1'], // Sync universes
+                'loyalty_balance' => $validated['loyalty_balance'] ?? 0,
+                'metadata' => $validated['metadata'] ?? [],
+                'notes' => $validated['notes'] ?? null,
+                'leader_id' => $validated['leader_id'] ?? null,
+                'tenant_id' => $validated['tenant_id'] ?? (app()->bound('tenant_id') ? app('tenant_id') : \App\Models\Tenant::first()?->id)
+            ]);
+
+            if (Schema::hasColumn('personas', 'sub_type')) {
+                $personaUpdateData['sub_type'] = $validated['sub_type'] ?? null;
+            }
+
+            $persona = Persona::withoutGlobalScopes()->updateOrCreate(
+                ['numero_celular' => $whatsapp],
+                $personaUpdateData
+            );
+
+            // Actualizar Geo (Postgres PostGIS / MySQL Spatial)
+            if (!empty($validated['latitude']) && !empty($validated['longitude'])) {
+                try {
+                    $lat = (float)$validated['latitude'];
+                    $lng = (float)$validated['longitude'];
+                    $driver = DB::connection()->getDriverName();
+                    
+                    if ($driver === 'pgsql') {
+                        // En Postgres intentamos ambos por si la columna se llama geom o location
+                        DB::statement("UPDATE personas SET location = ST_SetSRID(ST_MakePoint(?, ?), 4326) WHERE id = ?", [$lng, $lat, $persona->id]);
+                    } else {
+                        DB::statement("UPDATE personas SET location = ST_GeomFromText(?, 4326) WHERE id = ?", ["POINT($lng $lat)", $persona->id]);
+                    }
+                } catch (\Throwable $geoEx) {
+                    Log::warning('Spatial update ignored: ' . $geoEx->getMessage());
+                }
+            }
+
+            if ($persona->wasRecentlyCreated) {
+                try {
+                    $wspservice = app(\App\Services\WhatsAppNotificationService::class);
+                    $wspservice->sendGreetingNewCitizen($persona);
+                } catch (\Throwable $e) {
+                    Log::warning('WhatsApp greeting failed: ' . $e->getMessage());
+                }
+            }
+            return response()->json([
+                'success' => true,
+                'message' => 'Registro exitoso: ' . $persona->nombre,
+                'persona_id' => $persona->id,
+                'actual_tenant_id' => $persona->tenant_id, // Devolvemos el GUID real
+                'referral_code' => $persona->referral_code
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación: ' . implode(' ', \Illuminate\Support\Arr::flatten($e->errors())),
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Throwable $e) {
+            Log::error('SuperPersona CRITICAL ERROR: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error crítico en registro: ' . $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ], 500);
         }
+    }
 
     /**
      * API de Renderizado de Formularios (Pilar 2)
@@ -1017,5 +1046,106 @@ class PublicRegistrationController extends Controller
                 \Log::error('Failed to trigger FLOW 12 capacity alert: ' . $e->getMessage());
             }
         }
+    }
+
+    /**
+     * Confirma una reservación desde el Bot de n8n
+     */
+    public function confirmReservation(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $data = $request->validate([
+            'event_id' => 'required|exists:events,id',
+            'persona_id' => 'required|exists:personas,id',
+            'custom_fields' => 'nullable|array',
+            'event_slot_id' => 'nullable|exists:event_slots,id'
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $persona = Persona::findOrFail($data['persona_id']);
+            $event = Event::findOrFail($data['event_id']);
+
+            // Crear la cita/reservación
+            $appointment = \App\Models\Appointment::create([
+                'event_id' => $event->id,
+                'persona_id' => $persona->id,
+                'event_slot_id' => $data['event_slot_id'] ?? null,
+                'status' => 'scheduled',
+                'qr_code_token' => bin2hex(random_bytes(16)), // Token único para su QR de cita
+                'assigned_location' => trim("{$event->street} {$event->number}, {$event->neighborhood}"),
+            ]);
+
+            // Si hay campos personalizados (preguntas del bot), los guardamos como metadatos si fuera necesario
+            // Por ahora, registramos al asistente
+            \App\Models\EventAttendee::updateOrCreate(
+                ['event_id' => $event->id, 'persona_id' => $persona->id],
+                ['status' => 'registered']
+            );
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Reservación confirmada exitosamente',
+                'appointment_id' => $appointment->id,
+                'qr_token' => $appointment->qr_code_token
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al confirmar reservación',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtiene o crea una sesión de WhatsApp para seguimiento
+     */
+    public function getWhatsAppSession(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $phone = $request->input('phone');
+        $eventId = $request->input('event_id');
+
+        $session = \App\Models\WhatsAppSession::firstOrCreate(
+            ['phone_number' => $phone],
+            [
+                'session_id' => bin2hex(random_bytes(8)),
+                'conversation_state' => 'IDLE',
+                'current_step' => 0,
+                'expires_at' => now()->addHours(24)
+            ]
+        );
+
+        if ($eventId && $session->event_id != $eventId) {
+            $session->update([
+                'event_id' => $eventId,
+                'conversation_state' => 'RESERVING',
+                'current_step' => 0,
+                'context_data' => []
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'session' => $session->load('event')
+        ]);
+    }
+
+    /**
+     * Actualiza el progreso de la sesión
+     */
+    public function updateWhatsAppSession(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $id = $request->input('id');
+        $updates = $request->only(['conversation_state', 'current_step', 'context_data', 'metadata']);
+
+        $session = \App\Models\WhatsAppSession::findOrFail($id);
+        $session->update($updates);
+
+        return response()->json(['success' => true]);
     }
 }

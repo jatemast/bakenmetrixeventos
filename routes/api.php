@@ -22,6 +22,7 @@ use App\Http\Controllers\EventSlotController;
 use App\Http\Controllers\MetricsController;
 use App\Http\Controllers\EventTypeController;
 use App\Http\Controllers\OnboardingController;
+use App\Http\Controllers\TagController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Log;
@@ -76,6 +77,7 @@ Route::prefix('metrics')->group(function () {
 
     // Territories
     Route::get('/territories/hierarchy', [\App\Http\Controllers\TerritoryController::class, 'index']);
+    Route::get('/campaigns/{id}/invitation-metrics', [MetricsController::class, 'invitationMetrics']);
 });
 
 // Public Registration Routes
@@ -271,7 +273,17 @@ Route::middleware('auth:sanctum')->group(function () {
 // Personas Routes (public)
 Route::apiResource('personas', PersonaController::class);
 
+// Tags Management
+Route::apiResource('tags', TagController::class);
+Route::get('/public/tags-by-category', [TagController::class, 'getByCategory']);
+
 // Event Types (public for form building)
 Route::get('/event-types', [EventTypeController::class, 'index']);
 Route::get('/event-types/{id}', [EventTypeController::class, 'show']);
 Route::get('/event-types/{id}/preview-template', [EventTypeController::class, 'previewTemplate']);
+
+// Public SuperPersona Registration
+Route::post('/public/register-super-persona', [\App\Http\Controllers\PublicRegistrationController::class, 'storeSuperPersona']);
+Route::post('/public/confirm-reservation', [\App\Http\Controllers\PublicRegistrationController::class, 'confirmReservation']);
+Route::post('/public/whatsapp-session/get', [\App\Http\Controllers\PublicRegistrationController::class, 'getWhatsAppSession']);
+Route::post('/public/whatsapp-session/update', [\App\Http\Controllers\PublicRegistrationController::class, 'updateWhatsAppSession']);

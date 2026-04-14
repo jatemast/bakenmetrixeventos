@@ -286,8 +286,8 @@
 <body>
     <div class="container">
         <header>
-            <h1>REGISTRO INTELIGENTE</h1>
-            <p style="color: var(--text-dim);">Construyendo el futuro de la ciudad en 360°</p>
+            <h1>{{ $title ?? 'REGISTRO INTELIGENTE' }}</h1>
+            <p style="color: var(--text-dim);">Metrix Events: Gestión de Estructuras 360°</p>
         </header>
 
         <div id="eventHeader" class="card" style="display: none; border-color: var(--primary); border-width: 2px;">
@@ -304,6 +304,7 @@
         </div>
 
         <form id="superPersonaForm">
+            <input type="hidden" id="universe_type" value="{{ $universe ?? 'U1' }}">
             <!-- Sección 1: Identidad Completa -->
             <div class="card">
                 <h2>👤 Datos Personales</h2>
@@ -400,11 +401,41 @@
 
             <!-- Sección Clasificación -->
             <div class="card">
-                <h2>📊 Clasificación y Servicios</h2>
+                <h2>📊 Clasificación</h2>
+                
+                @if(($universe ?? 'U1') === 'U3')
+                <!-- Sección Específica para Líderes (Gremios) -->
+                <div class="input-group">
+                    <label>Tipo de Liderazgo / Gremio <span class="required">*</span></label>
+                    <select id="sub_type" required>
+                        <option value="" disabled selected>Selecciona tu Gremio...</option>
+                        <option value="Gremio de Taxistas">Gremio de Taxistas / Transporte</option>
+                        <option value="Líder de Comerciantes">Líder de Comerciantes / Mercados</option>
+                        <option value="Presidente Vecinal">Presidente Vecinal / Colono</option>
+                        <option value="Líder Sindical">Líder Sindical</option>
+                        <option value="Org. Civil">Organización Civil / ONG</option>
+                        <option value="Otro">Otro Tipo de Liderazgo</option>
+                    </select>
+                </div>
+                @elseif(($universe ?? 'U1') === 'U4')
+                <!-- Sección Específica para Militantes -->
+                <div class="input-group">
+                    <label>Tipo de Activismo <span class="required">*</span></label>
+                    <select id="sub_type" required>
+                        <option value="" disabled selected>Selecciona tu Rol...</option>
+                        <option value="Promotor de Campo">Promotor de Campo (Toca-Toca)</option>
+                        <option value="Coordinador de Zona">Coordinador de Zona</option>
+                        <option value="Voluntario de Eventos">Voluntario de Eventos</option>
+                        <option value="Activista Digital">Activista Digital / Redes</option>
+                        <option value="Simpatizante Activo">Simpatizante Activo</option>
+                    </select>
+                </div>
+                @endif
+
                 <div class="row">
                     <div class="input-group">
                         <label>Categoría</label>
-                        <input type="text" id="categoria" placeholder="Ej: Preferente, General">
+                        <input type="text" id="categoria" placeholder="Ej: General">
                     </div>
                     <div class="input-group">
                         <label>Tarifa</label>
@@ -615,15 +646,44 @@
                 </div>
             </div>
 
-            <button type="submit" class="btn-submit" id="submitBtn">💾 REGISTRAR CIUDADANO</button>
+            <button type="submit" class="btn-submit" id="submitBtn">
+                @if(($universe ?? 'U1') === 'U3')
+                    💾 ACTIVAR MI LIDERAZGO
+                @elseif(($universe ?? 'U1') === 'U4')
+                    💾 COMPLETAR ALTA MILITANTE
+                @else
+                    💾 REGISTRAR CIUDADANO
+                @endif
+            </button>
         </form>
 
         <div id="successScreen" class="success-screen card" style="display: none;">
-            <div class="icon">✅</div>
-            <h2>¡Registro Exitoso!</h2>
-            <p>Los datos del ciudadano han sido guardados correctamente en el CRM.</p>
-            <p style="margin-top: 1rem; font-size: 0.85rem;">Ya puedes cerrar esta ventana o regresar a WhatsApp.</p>
-            <button class="btn-submit" style="margin-top: 1.5rem;" onclick="window.location.reload()">📋 Registrar otro ciudadano</button>
+            <div class="icon" style="font-size: 4rem; margin-bottom: 1rem;">✨</div>
+            <h2 id="successTitle">¡Registro Exitoso!</h2>
+            
+            <div id="detectedProfileBox" style="background: rgba(16, 185, 129, 0.1); border: 1px solid var(--accent); border-radius: 1rem; padding: 1.5rem; margin: 1.5rem 0; text-align: left;">
+                <p style="color: var(--accent); font-weight: 700; font-size: 0.8rem; text-transform: uppercase; margin-bottom: 0.5rem; letter-spacing: 0.05em;">Perfil Detectado por IA</p>
+                <h3 id="profileName" style="margin: 0; font-size: 1.25rem;">Ciudadano 360</h3>
+                <p id="profileDesc" style="font-size: 0.9rem; color: var(--text-dim); margin-top: 0.5rem;">Identificado como perfil clave para la comunidad.</p>
+            </div>
+
+            <div class="card" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); border: 1px dashed var(--primary);">
+                <h3 style="margin-top: 0; font-size: 1rem;">🚀 ¡Gana 50 puntos extra!</h3>
+                <p style="font-size: 0.85rem; color: var(--text-dim);">Comparte este link con tus amigos y suma puntos cuando se registren.</p>
+                <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                    <input type="text" id="referralLink" readonly value="" style="flex: 1; font-size: 0.8rem; background: rgba(0,0,0,0.3);">
+                    <button type="button" onclick="copyReferral()" style="background: var(--primary); border: none; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer;">Copiar</button>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 2rem;">
+                <a id="waBackBtn" href="https://wa.me/{{ env('BUSINESS_PHONE', '521234567890') }}" class="btn-submit" style="text-decoration: none; display: flex; align-items: center; justify-content: center; background: #25D366; box-shadow: 0 4px 14px rgba(37, 211, 102, 0.4);">
+                    <i class="fab fa-whatsapp" style="margin-right: 8px;"></i> WhatsApp
+                </a>
+                <button class="btn-submit" onclick="window.location.reload()" style="background: rgba(255,255,255,0.05); color: white; box-shadow: none; border: 1px solid rgba(255,255,255,0.1);">
+                    Otro Registro
+                </button>
+            </div>
         </div>
     </div>
 
@@ -680,23 +740,34 @@
                 const data = await res.json();
                 if (data.address) {
                     const addr = data.address;
-                    if (addr.road) document.getElementById('calle').value = addr.road;
+                    // Mostrar Calle / Camino
+                    if (addr.road || addr.pedestrian) {
+                        document.getElementById('calle').value = addr.road || addr.pedestrian;
+                    }
+
                     if (addr.city || addr.town || addr.village) {
                         document.getElementById('municipio').value = addr.city || addr.town || addr.village;
                     }
+                    
+                    if (addr.state) {
+                        document.getElementById('estado').value = addr.state;
+                    }
+
+                    // Actualizar CP solo si es diferente para evitar bucles infinitos
                     if (addr.postcode) {
-                        const cpField = document.getElementById('codigo_postal');
-                        if (cpField.value !== addr.postcode) {
-                            cpField.value = addr.postcode;
-                            // Disparar búsqueda de CP si cambió
-                            lookupCP(addr.postcode, false); 
+                        const currentCP = document.getElementById('codigo_postal').value;
+                        if (currentCP !== addr.postcode && addr.postcode.length === 5) {
+                            document.getElementById('codigo_postal').value = addr.postcode;
+                            // lookupCP(addr.postcode, false); // No centrar de nuevo para evitar saltos del mapa
                         }
                     }
                     
-                    const colonia = addr.suburb || addr.neighbourhood || addr.city_district || '';
+                    const colonia = addr.suburb || addr.neighbourhood || addr.city_district || addr.subdivision || '';
                     if (colonia) {
                         updateColoniaUI(colonia);
                     }
+                    
+                    geoStatus.innerText = `✅ Ubicación: ${parseFloat(lat).toFixed(4)}, ${parseFloat(lng).toFixed(4)} | Dirección OK`;
                 }
             } catch (e) { 
                 console.error("Reverse Geocode Error", e);
@@ -748,7 +819,8 @@
                     const lon = parseFloat(data[0].lon);
                     map.flyTo([lat, lon], 16, { animate: true, duration: 1.5 });
                     marker.setLatLng([lat, lon]);
-                    updateCoords(lat, lon, false);
+                    // Llamar a updateCoords con true para que también intente adivinar la calle exacta
+                    updateCoords(lat, lon, true);
                 }
             } catch (e) { console.error("Geocoding failed", e); }
         }
@@ -780,16 +852,19 @@
                 });
                 const response = await res.json();
                 if (response.success) {
-                    const d = response.data; // Usar el nuevo wrapper 'data'
+                    const d = response.data;
                     
-                    // Mostrar campos extendidos
-                    document.getElementById('extendedAddress').style.display = 'block';
+                    // Asegurar que se muestre la calle y campos extendidos
+                    const extAddr = document.getElementById('extendedAddress');
+                    extAddr.style.display = 'block';
+                    extAddr.style.opacity = '0';
+                    setTimeout(() => extAddr.style.opacity = '1', 50);
                     
                     document.getElementById('municipio').value = d.municipio;
                     document.getElementById('estado').value = d.estado;
 
                     const container = document.getElementById('coloniaContainer');
-                    let selectHtml = `<select id="colonia" style="width: 100%; height: 45px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: #000; color: white; padding: 0 1rem;">`;
+                    let selectHtml = `<select id="colonia" style="width: 100%; padding: 0.75rem; border-radius: 0.5rem; border: 1px solid rgba(255,255,255,0.1); background: #000; color: white;">`;
                     d.colonias.forEach(col => {
                         selectHtml += `<option value="${col}">${col}</option>`;
                     });
@@ -811,6 +886,28 @@
             } catch (err) { console.error("CP Fetch Error:", err); }
         }
 
+        function copyReferral() {
+            const copyText = document.getElementById("referralLink");
+            copyText.select();
+            copyText.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(copyText.value);
+            alert("¡Link copiado! Envíalo a tus amigos 🚀");
+        }
+
+        function detectProfile(data, universes) {
+            const age = data.edad;
+            const isLeader = universes.includes('politico');
+            const hasPets = universes.includes('mascotas');
+            const isFamily = universes.includes('familia');
+
+            if (age < 35 && isLeader) return { name: "Líder Joven", desc: "Perfil estratégico con alta capacidad de movilización y visión de futuro." };
+            if (age >= 60) return { name: "Sabiduría Comunitaria", desc: "Pilar fundamental de la colonia con experiencia clave para el desarrollo social." };
+            if (hasPets && isFamily) return { name: "Ciudadano Comprometido", desc: "Interesado en el bienestar integral de su hogar y su entorno animal." };
+            if (isLeader) return { name: "Referente Social", desc: "Voz activa en la comunidad dedicada a la mejora del entorno ciudadano." };
+            
+            return { name: "Ciudadano 360", desc: "Perfil integral con interés en el crecimiento y bienestar de su ciudad." };
+        }
+
         document.getElementById('codigo_postal').addEventListener('input', (e) => {
             lookupCP(e.target.value, true);
         });
@@ -826,6 +923,8 @@
             const urlParams = new URLSearchParams(window.location.search);
             const data = {
                 whatsapp: document.getElementById('whatsapp').value,
+                universe_type: document.getElementById('universe_type').value,
+                sub_type: document.getElementById('sub_type') ? document.getElementById('sub_type').value : null,
                 curp: document.getElementById('curp').value || null,
                 cedula: document.getElementById('cedula').value || null,
                 nombre: document.getElementById('nombre').value,
@@ -853,7 +952,6 @@
                 tags: finalTags,
                 universes: activeUniverses,
                 leader_id: urlParams.get('leader'),
-                tenant_id: urlParams.get('tenant') || '7b544b80-315c-4606-aac9-c9846d2d09de', // Default Metrix Tenant
                 event_id: urlParams.get('event'),
                 timestamp: new Date().toISOString()
             };
@@ -869,12 +967,24 @@
                     body: JSON.stringify(data)
                 });
 
+                const result = await response.json();
                 if (response.ok) {
+                    // Generar Perfil IA
+                    const profile = detectProfile(data, activeUniverses);
+                    document.getElementById('profileName').innerText = profile.name;
+                    document.getElementById('profileDesc').innerText = profile.desc;
+
+                    // Generar Link de Referidos
+                    const refCode = result.referral_code || 'REF-' + Math.random().toString(36).substr(2, 9);
+                    const refLink = window.location.origin + window.location.pathname + '?leader=' + refCode;
+                    document.getElementById('referralLink').value = refLink;
+
+                    // Mostrar Pantalla de Éxito
                     document.getElementById('superPersonaForm').style.display = 'none';
                     document.getElementById('successScreen').style.display = 'block';
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
                 } else {
-                    const errorData = await response.json();
-                    alert("⚠️ " + (errorData.message || "Error del servidor. Revisa los datos."));
+                    alert("⚠️ Error: " + (result.message || 'Error del servidor'));
                     btn.disabled = false;
                     btn.innerText = "💾 REGISTRAR CIUDADANO";
                 }
