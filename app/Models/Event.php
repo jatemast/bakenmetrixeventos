@@ -113,6 +113,11 @@ class Event extends Model
         return $this->hasMany(Appointment::class);
     }
 
+    public function tags(): \Illuminate\Database\Eloquent\Relations\MorphToMany
+    {
+        return $this->morphToMany(Tag::class, 'taggable');
+    }
+
     /**
      * Schedule automated post-event processing
      * 
