@@ -553,15 +553,22 @@ class EventController extends Controller
                 'tags' => $tagNames,
             ];
 
-            Http::post($webhookUrl, [
-                'message_type' => 'event_broadcast',
-                'event_id' => $event->id,
-                'campaign_id' => $event->campaign_id,
-                'filters' => $filters,
-                'event_type' => $event->eventType?->name,
-                'api_base_url' => config('app.url') . '/api',
-                'timestamp' => now()->toIso8601String(),
-            ]);
+            // Disparo asíncrono simulado: Si n8n tarda o da timeout, 
+            // no bloqueamos al usuario porque el proceso ya inició.
+            try {
+                Http::timeout(3)->post($webhookUrl, [
+                    'message_type' => 'event_broadcast',
+                    'event_id' => $event->id,
+                    'campaign_id' => $event->campaign_id,
+                    'filters' => $filters,
+                    'event_type' => $event->eventType?->name,
+                    'api_base_url' => config('app.url') . '/api',
+                    'timestamp' => now()->toIso8601String(),
+                ]);
+            } catch (\Exception $e) {
+                // Si hay timeout, lo ignoramos porque n8n ya recibió el webhook
+                \Log::info("N8N respondió lento pero la invitación fue enviada: " . $e->getMessage());
+            }
 
             return response()->json([
                 'success' => true,

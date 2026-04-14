@@ -12,13 +12,6 @@ class Campaign extends Model
         'tenant_id',
         'name',
         'theme',
-        'objective',
-        'target_citizen',
-        'target_universes',
-        'special_observations',
-        'citizen_segmentation_file',
-        'leader_segmentation_file',
-        'militant_segmentation_file',
         'requesting_dependency',
         'campaign_manager',
         'email',
@@ -32,7 +25,6 @@ class Campaign extends Model
     ];
 
     protected $casts = [
-        'target_universes' => 'array',
         'start_date' => 'date',
         'end_date' => 'date',
     ];

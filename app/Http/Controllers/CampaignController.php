@@ -30,39 +30,14 @@ class CampaignController extends Controller
             try {
                 $data = $request->validated();
 
-                // Build file paths
-                $fileFields = [
-                    'citizen_segmentation_file',
-                    'leader_segmentation_file',
-                    'militant_segmentation_file',
-                ];
-
-                $hasSegmentationFiles = false;
-                foreach ($fileFields as $field) {
-                    if ($request->hasFile($field)) {
-                        $filePath = $request->file($field)->store('campaign_files', 'public');
-                        $data[$field] = $filePath;
-                        $hasSegmentationFiles = true;
-                    }
-                }
-
                 // SaaS: Assign tenant and creator
                 $data['tenant_id'] = app()->bound('tenant_id') ? app('tenant_id') : null;
                 $data['created_by'] = auth()->id();
 
                 $campaign = Campaign::create($data);
 
-                // Auto-process segmentation files if any were uploaded
-                $processingStats = null;
-                if ($hasSegmentationFiles) {
-                    try {
-                        $service = new CsvSegmentationService();
-                        $processingStats = $service->processAllSegmentationFiles($campaign);
-                        Log::info("Auto-processed CSV files for new campaign {$campaign->id}", $processingStats);
-                    } catch (\Exception $e) {
-                        Log::error("Error auto-processing segmentation for campaign {$campaign->id}: {$e->getMessage()}");
-                    }
-                }
+                // Generate militant QR codes when campaign is created
+                $militantQrStats = null;
 
                 // Generate militant QR codes when campaign is created
                 $militantQrStats = null;
@@ -76,7 +51,6 @@ class CampaignController extends Controller
                 return response()->json([
                     'message' => 'Campaña creada exitosamente',
                     'campaign' => $campaign,
-                    'segmentation_processing' => $processingStats,
                     'militant_qr_generation' => $militantQrStats
                 ], 201);
 
@@ -115,8 +89,15 @@ class CampaignController extends Controller
         $totalCheckouts = 0;
 
         foreach ($campaign->events as $event) {
-            $totalAttendees += $event->attendees->count();
-            $totalCheckins += $event->attendees->whereNotNull('checkin_at')->count();
+            $regCount = $event->attendees->count();
+            $attCount = $event->attendees->whereNotNull('checkin_at')->count();
+            
+            // Inyectamos los conteos reales al objeto del evento
+            $event->registered_count = $regCount;
+            $event->attendee_count = $attCount;
+
+            $totalAttendees += $regCount;
+            $totalCheckins += $attCount;
             $totalCheckouts += $event->attendees->whereNotNull('checkout_at')->count();
         }
 
@@ -144,50 +125,11 @@ class CampaignController extends Controller
         $campaign = Campaign::findOrFail($id);
         $data = $request->validated();
 
-        $fileFields = [
-            'citizen_segmentation_file',
-            'leader_segmentation_file',
-            'militant_segmentation_file',
-        ];
-
-        $filesChanged = false;
-        foreach ($fileFields as $field) {
-            if ($request->hasFile($field)) {
-                // Eliminar archivo antiguo si existe
-                if ($campaign->{$field} && Storage::disk('public')->exists($campaign->{$field})) {
-                    Storage::disk('public')->delete($campaign->{$field});
-                }
-                $filePath = $request->file($field)->store('campaign_files', 'public');
-                $data[$field] = $filePath;
-                $filesChanged = true;
-            } elseif (isset($data[$field]) && $data[$field] === null) {
-                // Si el campo se envía como null, eliminar el archivo existente
-                if ($campaign->{$field} && Storage::disk('public')->exists($campaign->{$field})) {
-                    Storage::disk('public')->delete($campaign->{$field});
-                }
-                $data[$field] = null;
-            }
-        }
-
         $campaign->update($data);
-
-        // Auto-process segmentation files if any were changed/added
-        $processingStats = null;
-        if ($filesChanged) {
-            try {
-                $service = new CsvSegmentationService();
-                $processingStats = $service->processAllSegmentationFiles($campaign);
-                Log::info("Auto-processed updated CSV files for campaign {$campaign->id}", $processingStats);
-            } catch (\Exception $e) {
-                Log::error("Error auto-processing segmentation for campaign {$campaign->id}: {$e->getMessage()}");
-                // Don't fail campaign update if processing fails
-            }
-        }
 
         return response()->json([
             'message' => 'Campaña actualizada exitosamente',
-            'campaign' => $campaign,
-            'segmentation_processing' => $processingStats
+            'campaign' => $campaign
         ]);
     }
 
@@ -197,19 +139,6 @@ class CampaignController extends Controller
     public function destroy(string $id): JsonResponse
     {
         $campaign = Campaign::findOrFail($id);
-
-        $fileFields = [
-            'citizen_segmentation_file',
-            'leader_segmentation_file',
-            'militant_segmentation_file',
-        ];
-
-        foreach ($fileFields as $field) {
-            if ($campaign->{$field} && Storage::disk('public')->exists($campaign->{$field})) {
-                Storage::disk('public')->delete($campaign->{$field});
-            }
-        }
-
         $campaign->delete();
 
         return response()->json([
@@ -320,11 +249,7 @@ class CampaignController extends Controller
             }
         }
 
-        // 3. Universe Segmentation
-        if ($campaign->target_universes && count($campaign->target_universes) > 0) {
-            $query->whereIn('universe_type', $campaign->target_universes);
-        }
-
+        // 3. Universe Segmentation (Inherited from Request)
         if ($universeFilter) {
             $universes = explode(',', $universeFilter);
             $query->whereIn('universe_type', $universes);
@@ -417,7 +342,6 @@ class CampaignController extends Controller
                 'id' => $campaign->id,
                 'name' => $campaign->name,
                 'theme' => $campaign->theme,
-                'target_universes' => $campaign->target_universes,
             ],
             'personas' => $personas,
             'meta' => [
@@ -429,115 +353,7 @@ class CampaignController extends Controller
         ]);
     }
 
-    /**
-     * Process all CSV segmentation files for a campaign.
-     * 
-     * This endpoint triggers the import of personas from uploaded CSV files.
-     * Should be called after campaign creation or when files are updated.
-     */
-    public function processSegmentation(string $id): JsonResponse
-    {
-        $campaign = Campaign::findOrFail($id);
-        
-        // Check if any segmentation files exist
-        if (!$campaign->citizen_segmentation_file && 
-            !$campaign->leader_segmentation_file && 
-            !$campaign->militant_segmentation_file) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No segmentation files found for this campaign'
-            ], 400);
-        }
 
-        try {
-            $service = new CsvSegmentationService();
-            $stats = $service->processAllSegmentationFiles($campaign);
-
-            // Log the import
-            Log::info("CSV segmentation processed for campaign {$id}", $stats);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Segmentation files processed successfully',
-                'statistics' => $stats
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error("Error processing segmentation for campaign {$id}: {$e->getMessage()}");
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Error processing segmentation files',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Validate a segmentation file without processing it
-     */
-    public function validateSegmentation(string $id, Request $request): JsonResponse
-    {
-        $campaign = Campaign::findOrFail($id);
-        
-        $fileType = $request->input('file_type'); // 'citizen', 'leader', or 'militant'
-        
-        $fileField = match($fileType) {
-            'citizen' => 'citizen_segmentation_file',
-            'leader' => 'leader_segmentation_file',
-            'militant' => 'militant_segmentation_file',
-            default => null
-        };
-
-        if (!$fileField || !$campaign->{$fileField}) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid file type or file not found'
-            ], 400);
-        }
-
-        $service = new CsvSegmentationService();
-        $validation = $service->validateCsvFile($campaign->{$fileField});
-
-        return response()->json([
-            'success' => $validation['valid'],
-            'validation' => $validation
-        ]);
-    }
-
-    /**
-     * Get preview of segmentation file data
-     */
-    public function previewSegmentation(string $id, Request $request): JsonResponse
-    {
-        $campaign = Campaign::findOrFail($id);
-        
-        $fileType = $request->input('file_type'); // 'citizen', 'leader', or 'militant'
-        $limit = $request->input('limit', 5);
-        
-        $fileField = match($fileType) {
-            'citizen' => 'citizen_segmentation_file',
-            'leader' => 'leader_segmentation_file',
-            'militant' => 'militant_segmentation_file',
-            default => null
-        };
-
-        if (!$fileField || !$campaign->{$fileField}) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid file type or file not found'
-            ], 400);
-        }
-
-        $service = new CsvSegmentationService();
-        $preview = $service->getCsvPreview($campaign->{$fileField}, $limit);
-
-        return response()->json([
-            'success' => true,
-            'file_type' => $fileType,
-            'preview' => $preview
-        ]);
-    }
 
     /**
      * Get militant QR distribution data for n8n workflow

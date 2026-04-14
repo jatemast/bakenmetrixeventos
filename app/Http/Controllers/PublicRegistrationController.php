@@ -517,10 +517,9 @@ class PublicRegistrationController extends Controller
     private function normalizePhoneNumber($phone)
     {
         // Remove all non-numeric characters
-        $phone = preg_replace('/[^0-9]/', '', $phone);
+        $phone = preg_replace('/[^0-9]/', '', (string)$phone);
         
-        // Handle n8n array flattening/concatenation bugs (e.g., repeating numbers)
-        // If number is very long and has a repeating pattern at start/end
+        // Handle n8n array flattening/concatenation bugs
         if (strlen($phone) >= 20) {
             $half = strlen($phone) / 2;
             $firstHalf = substr($phone, 0, $half);
@@ -530,11 +529,8 @@ class PublicRegistrationController extends Controller
             }
         }
         
-        if (strlen($phone) > 15) {
-            $phone = substr($phone, 0, 12); // Fallback to standard length
-        }
-
-        // Add country code if not present (assuming Mexico +52)
+        // Add country code ONLY if it's a 10-digit number.
+        // If it starts with 57 (Colombia) and has 12 digits, we leave it alone.
         if (strlen($phone) == 10) {
             $phone = '52' . $phone;
         }
@@ -1107,15 +1103,28 @@ class PublicRegistrationController extends Controller
      */
     public function getWhatsAppSession(Request $request): \Illuminate\Http\JsonResponse
     {
-        $phone = $request->input('phone');
+        $phone = $this->normalizePhoneNumber($request->input('phone'));
         $eventId = $request->input('event_id');
+
+        // RESCUE: If persona_id is not provided, try to find persona by phone
+        $persona = \App\Models\Persona::where('numero_celular', $phone)->first();
+
+        if (!$persona) {
+            return response()->json([
+                'success' => false,
+                'message' => 'El ciudadano no está registrado en el CRM. Debe registrarse primero.',
+                'error_code' => 'PERSONA_NOT_FOUND'
+            ], 404);
+        }
 
         $session = \App\Models\WhatsAppSession::firstOrCreate(
             ['phone_number' => $phone],
             [
+                'persona_id' => $persona->id,
                 'session_id' => bin2hex(random_bytes(8)),
-                'conversation_state' => 'IDLE',
+                'conversation_state' => 'active',
                 'current_step' => 0,
+                'last_message_at' => now(), // Arreglo para el error 23502
                 'expires_at' => now()->addHours(24)
             ]
         );
@@ -1123,7 +1132,7 @@ class PublicRegistrationController extends Controller
         if ($eventId && $session->event_id != $eventId) {
             $session->update([
                 'event_id' => $eventId,
-                'conversation_state' => 'RESERVING',
+                'conversation_state' => 'awaiting_event_selection',
                 'current_step' => 0,
                 'context_data' => []
             ]);
