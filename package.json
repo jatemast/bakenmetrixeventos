@@ -1,9 +1,9 @@
 {
-    "$schema": "https://www.schemastore.org/package.json",
-    "private": true,
-    "type": "module",
-    "scripts": {},
-    "dependencies": {
-        "xlsx": "^0.18.5"
-    }
+  "$schema": "https://www.schemastore.org/package.json",
+  "private": true,
+  "type": "module",
+  "scripts": {},
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
 }

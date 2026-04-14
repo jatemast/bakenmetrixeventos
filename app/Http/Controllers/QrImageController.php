@@ -56,20 +56,16 @@ class QrImageController extends Controller
      */
     public function getCrmRegistrationQr(): JsonResponse
     {
-        // Get number from .env
-        $countryCode = env('BUSINESS_COUNTRY_CODE', '57');
-        $phone = env('BUSINESS_PHONE', '3116759270');
-        $whatsappNumber = $countryCode . $phone;
-        
-        $text = "¡HOLA METRIX, QUIERO REGISTRARME!";
-        $url = "https://wa.me/{$whatsappNumber}?text=" . urlencode($text);
+        $baseUrl = config('app.frontend_url', 'http://localhost:5173');
+        $url = "{$baseUrl}/registro/ciudadano";
         
         return response()->json([
             'success' => true,
             'qr_purpose' => 'CRM Public Registration',
-            'whatsapp_url' => $url,
+            'registration_url' => $url,
+            'whatsapp_url' => $url, // Keep for legacy FE compatibility
             'qr_image_url' => "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" . urlencode($url),
-            'note' => 'Scan this QR to start the AI conversation for CRM onboarding.'
+            'note' => 'Escanea para registrarte directamente en nuestro censo digital.'
         ]);
     }
 

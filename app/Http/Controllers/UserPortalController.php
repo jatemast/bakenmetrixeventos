@@ -246,6 +246,8 @@ class UserPortalController extends Controller
                 'whatsapp_number' => $persona->numero_celular,
                 'email' => $persona->email,
                 'universe_type' => $persona->universe_type ?? 'U1',
+                'referral_code' => $persona->referral_code, 
+                'tenant_id' => $persona->tenant_id,
                 'qr_type' => $persona->qr_type ?? 'QR1',
                 'notification_preferences' => [
                     'whatsapp' => $persona->whatsapp_notifications ?? true,

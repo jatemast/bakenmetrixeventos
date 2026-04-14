@@ -106,43 +106,121 @@ class WhatsAppNotificationService
     }
 
     /**
+     * Send Entry (QR2) and Exit (QR3) codes to a registered attendee
+     */
+    public function sendEventQrs($persona, $event): bool
+    {
+        [$metaToken, $metaPhoneId] = $this->getMetaCredentials();
+        $n8nUrl = config('services.n8n.webhook_flow4_url') ?? 'https://n8n.soymetrix.com/webhook/enviar-mensaje';
+
+        if (!$persona->numero_celular) return false;
+
+        $checkinQr = "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" . ($event->checkin_code);
+        $checkoutQr = "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" . ($event->checkout_code);
+
+        $message = "✅ *¡Registro Confirmado!*\n\n"
+                 . "Hola {$persona->nombre}, ya estás registrado(a) para el evento:\n"
+                 . "📍 *{$event->detail}*\n"
+                 . "📅 *Fecha:* {$event->date} a las {$event->time}\n\n"
+                 . "--------------------------\n"
+                 . "🎟️ *TU CÓDIGO DE ENTRADA (SCAN ENTRY)*\n"
+                 . "{$checkinQr}\n\n"
+                 . "📤 *TU CÓDIGO DE SALIDA (SCAN EXIT)*\n"
+                 . "{$checkoutQr}\n\n"
+                 . "¡Muestra estos códigos al personal del evento!";
+
+        $payload = [
+            'token' => $metaToken,
+            'phone_number_id' => $metaPhoneId,
+            'destinatario' => $persona->numero_celular,
+            'tipo' => 'text',
+            'mensaje' => $message,
+        ];
+
+        try {
+            $response = Http::timeout(10)->post($n8nUrl, $payload);
+            return $response->successful();
+        } catch (\Exception $e) {
+            Log::error("Error sending event QRs: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Send specialized invitation to a Leader (U3)
+     * Includes personal entry/exit and their unique Guest invitation QR/Link
+     */
+    public function sendLeaderEventInvitation($persona, $event, string $leaderQrCode): bool
+    {
+        [$metaToken, $metaPhoneId] = $this->getMetaCredentials();
+        $n8nUrl = config('services.n8n.webhook_flow4_url') ?? 'https://n8n.soymetrix.com/webhook/enviar-mensaje';
+
+        if (!$persona->numero_celular) return false;
+
+        $checkinQr = "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" . ($event->checkin_code);
+        $leaderInvitationUrl = url("/invitation/{$leaderQrCode}");
+
+        $message = "👑 *¡CONVOCATORIA PARA LÍDERES!*\n\n"
+                 . "Hola {$persona->nombre}, eres clave para el éxito del evento:\n"
+                 . "📍 *{$event->detail}*\n"
+                 . "📅 *Fecha:* {$event->date} - {$event->time}\n\n"
+                 . "--------------------------\n"
+                 . "🎟️ *TU ACCESO PERSONAL (STAFF)*\n"
+                 . "{$checkinQr}\n\n"
+                 . "🚀 *TU ENLACE ÚNICO DE INVITACIÓN*\n"
+                 . "Usa este enlace para registrar a tu grupo y que cuente para tus metas:\n"
+                 . "🔗 {$leaderInvitationUrl}\n\n"
+                 . "¡Vamos por todo!";
+
+        $payload = [
+            'token' => $metaToken,
+            'phone_number_id' => $metaPhoneId,
+            'destinatario' => $persona->numero_celular,
+            'tipo' => 'text',
+            'mensaje' => $message,
+        ];
+
+        try {
+            $response = Http::timeout(10)->post($n8nUrl, $payload);
+            return $response->successful();
+        } catch (\Exception $e) {
+            Log::error("Error sending leader invitation: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Send welcome message to a newly registered user
      */
     public function sendWelcomeMessage($persona): bool
     {
         [$metaToken, $metaPhoneId] = $this->getMetaCredentials();
-        $n8nUrl = config('services.n8n.webhook_flow4_url') ?? 'https://n8n.soymetrix.com/webhook/enviar-invitacion';
+        // New Orchestrator Webhook
+        $n8nUrl = config('services.n8n.webhook_orchestrator_url') ?? 'https://n8n.soymetrix.com/webhook/registro-exitoso-orquestador';
         
-        $destinatario = $persona->numero_celular;
-        $nombre = $persona->nombre;
-
         $payload = [
-            'token' => $metaToken,
-            'phone_number_id' => $metaPhoneId,
-            'destinatario' => $destinatario,
-            'tipo' => 'text',
-            'mensaje' => "🎉 *¡Bienvenido a METRIX, {$nombre}!*\n\n"
-                . "Tu registro en nuestro CRM ha sido exitoso.\n\n"
-                . "📋 *Datos registrados:*\n"
-                . "• Nombre: {$nombre} {$persona->apellido_paterno}\n"
-                . "• Cédula: " . ($persona->cedula ?? 'Pendiente') . "\n"
-                . "• WhatsApp: {$destinatario}\n\n"
-                . "🏆 Ahora puedes acumular puntos asistiendo a nuestros eventos.\n\n"
-                . "¡Gracias por registrarte!",
+            'action' => 'WELCOME_NEW_USER',
+            'persona' => [
+                'id' => $persona->id,
+                'nombre' => $persona->nombre,
+                'apellido' => $persona->apellido_paterno,
+                'whatsapp' => $persona->numero_celular,
+                'universe_type' => $persona->universe_type,
+                'sub_type' => $persona->sub_type,
+                'tenant_id' => $persona->cuenta_id ?? $persona->tenant_id,
+            ],
+            'meta' => [
+                'token' => $metaToken,
+                'phone_id' => $metaPhoneId
+            ]
         ];
 
         try {
-            Log::info("Sending registration welcome to {$destinatario} via n8n", ['url' => $n8nUrl, 'phone_id' => $metaPhoneId]);
+            Log::info("Triggering n8n ORCHESTRATOR for welcome: {$persona->numero_celular}");
             $response = Http::timeout(10)->post($n8nUrl, $payload);
-            
-            if ($response->failed()) {
-                Log::error("n8n welcome webhook failed: " . $response->body());
-                return false;
-            }
-
-            return true;
+            return $response->successful();
         } catch (\Exception $e) {
-            Log::error("Error triggering welcome webhook: " . $e->getMessage());
+            Log::error("Error triggering orchestrator: " . $e->getMessage());
             return false;
         }
     }
