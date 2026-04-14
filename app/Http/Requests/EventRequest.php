@@ -46,25 +46,67 @@ class EventRequest extends FormRequest
             'country' => 'nullable|string|max:255',
             'bonus_points_for_attendee' => 'required|integer|min:0',
             'bonus_points_for_leader' => 'required|integer|min:0',
+            'bonus_points_per_referral' => 'nullable|numeric|min:0',
             'form_schema' => 'nullable|array',
             'success_message' => 'nullable|string',
             'slot_unit_name' => 'nullable|string|max:50',
             'grace_period_hours' => 'nullable|integer|min:1|max:24',
+            'target_audience_filters' => 'nullable|array',
+            'tag_ids' => 'nullable|array',
+            'tag_ids.*' => 'exists:tags,id',
         ];
     }
 
     /**
+     * Configure the validator instance.
+     * Validate that event date falls within the campaign's date range.
+     * Auto-calculate the status based on event date if not provided.
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            if ($this->has('campaign_id') && $this->has('date') && !$validator->errors()->has('date')) {
+                $campaign = \App\Models\Campaign::find($this->campaign_id);
+                if ($campaign) {
+                    $eventDate = \Carbon\Carbon::parse($this->date);
+                    
+                    if ($campaign->start_date && $eventDate->lt(\Carbon\Carbon::parse($campaign->start_date)->startOfDay())) {
+                        $validator->errors()->add('date', 
+                            "La fecha del evento no puede ser anterior al inicio de la campaña ({$campaign->start_date->format('d/m/Y')})."
+                        );
+                    }
+                    if ($campaign->end_date && $eventDate->gt(\Carbon\Carbon::parse($campaign->end_date)->endOfDay())) {
+                        $validator->errors()->add('date', 
+                            "La fecha del evento no puede ser posterior al fin de la campaña ({$campaign->end_date->format('d/m/Y')})."
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    /**
      * Prepare the data for validation.
-     * Decode JSON strings before validation
+     * Decode JSON strings before validation (supports multipart form data)
      */
     protected function prepareForValidation()
     {
-        if ($this->has('target_universes') && is_string($this->target_universes)) {
-            $decoded = json_decode($this->target_universes, true);
-            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                $this->merge([
-                    'target_universes' => $decoded
-                ]);
+        $jsonFields = ['target_universes', 'form_schema', 'target_audience_filters', 'tag_ids'];
+
+        foreach ($jsonFields as $field) {
+            if ($this->has($field) && is_string($this->input($field))) {
+                $raw = $this->input($field);
+                
+                // Handle "null" string from frontend
+                if ($raw === 'null') {
+                    $this->merge([$field => null]);
+                    continue;
+                }
+
+                $decoded = json_decode($raw, true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $this->merge([$field => $decoded]);
+                }
             }
         }
     }

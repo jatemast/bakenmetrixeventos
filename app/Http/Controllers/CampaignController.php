@@ -26,53 +26,44 @@ class CampaignController extends Controller
      */
     public function store(CampaignRequest $request): JsonResponse
     {
-        $data = $request->validated();
-
-        $fileFields = [
-            'citizen_segmentation_file',
-            'leader_segmentation_file',
-            'militant_segmentation_file',
-        ];
-
-        $hasSegmentationFiles = false;
-        foreach ($fileFields as $field) {
-            if ($request->hasFile($field)) {
-                $filePath = $request->file($field)->store('campaign_files', 'public');
-                $data[$field] = $filePath;
-                $hasSegmentationFiles = true;
-            }
-        }
-
-        $campaign = Campaign::create($data);
-
-        // Auto-process segmentation files if any were uploaded
-        $processingStats = null;
-        if ($hasSegmentationFiles) {
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($request) {
             try {
-                $service = new CsvSegmentationService();
-                $processingStats = $service->processAllSegmentationFiles($campaign);
-                Log::info("Auto-processed CSV files for new campaign {$campaign->id}", $processingStats);
+                $data = $request->validated();
+
+                // SaaS: Assign tenant and creator
+                $data['tenant_id'] = app()->bound('tenant_id') ? app('tenant_id') : null;
+                $data['created_by'] = auth()->id();
+
+                $campaign = Campaign::create($data);
+
+                // Generate militant QR codes when campaign is created
+                $militantQrStats = null;
+
+                // Generate militant QR codes when campaign is created
+                $militantQrStats = null;
+                try {
+                    $militantQrStats = $this->militantQrService->generateCampaignMilitantQrs($campaign);
+                    Log::info("Generated militant QR codes for campaign {$campaign->id}", $militantQrStats ?: []);
+                } catch (\Exception $e) {
+                    Log::error("Error generating militant QRs for campaign {$campaign->id}: {$e->getMessage()}");
+                }
+
+                return response()->json([
+                    'message' => 'Campaña creada exitosamente',
+                    'campaign' => $campaign,
+                    'militant_qr_generation' => $militantQrStats
+                ], 201);
+
             } catch (\Exception $e) {
-                Log::error("Error auto-processing segmentation for campaign {$campaign->id}: {$e->getMessage()}");
-                // Don't fail campaign creation if processing fails
+                \Illuminate\Support\Facades\Log::error('Campaign Creation Error: ' . $e->getMessage(), [
+                    'trace' => $e->getTraceAsString()
+                ]);
+                return response()->json([
+                    'message' => 'Error al crear la campaña',
+                    'error' => $e->getMessage()
+                ], 500);
             }
-        }
-
-        // Generate militant QR codes when campaign is created
-        $militantQrStats = null;
-        try {
-            $militantQrStats = $this->militantQrService->generateCampaignMilitantQrs($campaign);
-            Log::info("Generated militant QR codes for campaign {$campaign->id}", $militantQrStats);
-        } catch (\Exception $e) {
-            Log::error("Error generating militant QRs for campaign {$campaign->id}: {$e->getMessage()}");
-        }
-
-        return response()->json([
-            'message' => 'Campaña creada exitosamente',
-            'campaign' => $campaign,
-            'segmentation_processing' => $processingStats,
-            'militant_qr_generation' => $militantQrStats
-        ], 201);
+        });
     }
 
     /**
@@ -98,8 +89,15 @@ class CampaignController extends Controller
         $totalCheckouts = 0;
 
         foreach ($campaign->events as $event) {
-            $totalAttendees += $event->attendees->count();
-            $totalCheckins += $event->attendees->whereNotNull('checkin_at')->count();
+            $regCount = $event->attendees->count();
+            $attCount = $event->attendees->whereNotNull('checkin_at')->count();
+            
+            // Inyectamos los conteos reales al objeto del evento
+            $event->registered_count = $regCount;
+            $event->attendee_count = $attCount;
+
+            $totalAttendees += $regCount;
+            $totalCheckins += $attCount;
             $totalCheckouts += $event->attendees->whereNotNull('checkout_at')->count();
         }
 
@@ -127,50 +125,11 @@ class CampaignController extends Controller
         $campaign = Campaign::findOrFail($id);
         $data = $request->validated();
 
-        $fileFields = [
-            'citizen_segmentation_file',
-            'leader_segmentation_file',
-            'militant_segmentation_file',
-        ];
-
-        $filesChanged = false;
-        foreach ($fileFields as $field) {
-            if ($request->hasFile($field)) {
-                // Eliminar archivo antiguo si existe
-                if ($campaign->{$field} && Storage::disk('public')->exists($campaign->{$field})) {
-                    Storage::disk('public')->delete($campaign->{$field});
-                }
-                $filePath = $request->file($field)->store('campaign_files', 'public');
-                $data[$field] = $filePath;
-                $filesChanged = true;
-            } elseif (isset($data[$field]) && $data[$field] === null) {
-                // Si el campo se envía como null, eliminar el archivo existente
-                if ($campaign->{$field} && Storage::disk('public')->exists($campaign->{$field})) {
-                    Storage::disk('public')->delete($campaign->{$field});
-                }
-                $data[$field] = null;
-            }
-        }
-
         $campaign->update($data);
-
-        // Auto-process segmentation files if any were changed/added
-        $processingStats = null;
-        if ($filesChanged) {
-            try {
-                $service = new CsvSegmentationService();
-                $processingStats = $service->processAllSegmentationFiles($campaign);
-                Log::info("Auto-processed updated CSV files for campaign {$campaign->id}", $processingStats);
-            } catch (\Exception $e) {
-                Log::error("Error auto-processing segmentation for campaign {$campaign->id}: {$e->getMessage()}");
-                // Don't fail campaign update if processing fails
-            }
-        }
 
         return response()->json([
             'message' => 'Campaña actualizada exitosamente',
-            'campaign' => $campaign,
-            'segmentation_processing' => $processingStats
+            'campaign' => $campaign
         ]);
     }
 
@@ -180,19 +139,6 @@ class CampaignController extends Controller
     public function destroy(string $id): JsonResponse
     {
         $campaign = Campaign::findOrFail($id);
-
-        $fileFields = [
-            'citizen_segmentation_file',
-            'leader_segmentation_file',
-            'militant_segmentation_file',
-        ];
-
-        foreach ($fileFields as $field) {
-            if ($campaign->{$field} && Storage::disk('public')->exists($campaign->{$field})) {
-                Storage::disk('public')->delete($campaign->{$field});
-            }
-        }
-
         $campaign->delete();
 
         return response()->json([
@@ -221,38 +167,63 @@ class CampaignController extends Controller
         $seccionFilter = $request->input('seccion') ?: null;
         $cdzFilter = $request->input('cdz') ?: null;
         $searchFilter = $request->input('search') ?: null;
+        $tagFilter = $request->input('tags') ?: null; // New: comma separated tags or tag names
         
         $minAge = $request->input('min_age');
         $maxAge = $request->input('max_age');
         
-        $includeAttendees = $request->boolean('include_attendees', true); // Include past attendees
-        $limit = $request->input('limit'); // Optional limit
-        $offset = $request->input('offset', 0); // Pagination offset
+        $includeAttendees = $request->boolean('include_attendees', true);
+        $limit = $request->input('limit');
+        $offset = $request->input('offset', 0);
 
-        // Start building query
         $query = Persona::query();
 
-        // 0. Event Context & Proximity Intelligence
+        // 0. Event Context & Audience Intelligence
         $eventId = $request->input('event_id');
         $event = null;
         if ($eventId) {
-            $event = \App\Models\Event::find($eventId);
+            $event = \App\Models\Event::with('tags')->find($eventId);
             if ($event) {
-                // If the user didn't provide a manual filter, we inherit from the event
+                // Inherit territory from event if not provided
                 if (!$territorioFilter && $event->municipality) {
                     $territorioFilter = $event->municipality;
                 }
                 if (!$coloniaFilter && $event->neighborhood) {
                     $coloniaFilter = $event->neighborhood;
                 }
+
+                // If event has tags, we prioritize personas who match at least one event tag
+                $eventTagNames = $event->tags->pluck('name')->toArray();
+                if (!empty($eventTagNames)) {
+                    $query->where(function($q) use ($eventTagNames) {
+                        foreach ($eventTagNames as $tagName) {
+                            $q->orWhereJsonContains('tags', $tagName);
+                        }
+                    });
+                }
             }
         }
 
-        // 1. Audience Segmentation (Pilar 1 - Generics & Demographics)
+        // 1. Tag Filtering (Explicit or Theme-based)
+        if ($tagFilter) {
+            $tags = explode(',', $tagFilter);
+            $query->where(function($q) use ($tags) {
+                foreach ($tags as $tag) {
+                    $q->orWhereJsonContains('tags', trim($tag));
+                }
+            });
+        } elseif ($campaign->theme && !$eventId) {
+            // Auto-filter by theme if no specific event/tag is requested
+            $theme = $campaign->theme;
+            $query->where(function($q) use ($theme) {
+                $q->orWhere('tags', 'like', "%{$theme}%") // Soft match for variations
+                  ->orWhereJsonContains('tags', $theme);
+            });
+        }
+
+        // 2. Audience Segmentation (Pilar 1 - Demographic Logic)
         if ($event && $event->target_audience_filters) {
-            $filters = is_string($event->target_audience_filters) 
-                ? json_decode($event->target_audience_filters, true) 
-                : $event->target_audience_filters;
+            $filters = $event->target_audience_filters;
             
             $hasBeneficiaries = $filters['has_beneficiaries'] ?? $filters['has_pets'] ?? false;
             if ($hasBeneficiaries === true || $hasBeneficiaries === 'true') {
@@ -261,34 +232,30 @@ class CampaignController extends Controller
                         ->orWhereHas('mascotas')
                         ->orWhereJsonContains('universes', 'mascotas')
                         ->orWhereJsonContains('tags', 'tiene_mascotas')
-                        ->orWhereJsonContains('tags', 'Dueño de Perro');
+                        ->orWhereJsonContains('tags', 'Dueño de Perro')
+                        ->orWhereJsonContains('tags', 'Dueño de Gato');
                 });
             }
-            if (isset($filters['gender'])) {
-                $query->where('sexo', $filters['gender']);
+            if (!empty($filters['gender']) && $filters['gender'] !== 'both') {
+                $genderMap = ['male' => 'H', 'female' => 'M'];
+                $mappedGender = $genderMap[$filters['gender']] ?? $filters['gender'];
+                $query->where('sexo', $mappedGender);
             }
             if (!empty($minAge) || !empty($filters['min_age'])) {
-                $qMin = $minAge ?: $filters['min_age'];
-                $query->where('edad', '>=', $qMin);
+                $query->where('edad', '>=', $minAge ?: $filters['min_age']);
             }
             if (!empty($maxAge) || !empty($filters['max_age'])) {
-                $qMax = $maxAge ?: $filters['max_age'];
-                $query->where('edad', '<=', $qMax);
+                $query->where('edad', '<=', $maxAge ?: $filters['max_age']);
             }
         }
 
-        // 2. Universe Segmentation (Critical for Campaign alignment)
-        if ($campaign->target_universes && count($campaign->target_universes) > 0) {
-            $query->whereIn('universe_type', $campaign->target_universes);
-        }
-
+        // 3. Universe Segmentation (Inherited from Request)
         if ($universeFilter) {
             $universes = explode(',', $universeFilter);
             $query->whereIn('universe_type', $universes);
         }
 
-        // 3. SMART TERRITORY ENGINE (Multi-column resilience)
-        // If a territory or neighborhood is provided, we search across all columns to catch "swapped" or "combined" data
+        // 4. SMART TERRITORY ENGINE 
         if ($territorioFilter || $coloniaFilter) {
             $query->where(function($q) use ($territorioFilter, $coloniaFilter) {
                 if ($territorioFilter) {
@@ -299,128 +266,82 @@ class CampaignController extends Controller
                            ->orWhere('estado', 'like', "%{$territorioFilter}%");
                     });
                 }
-                
                 if ($coloniaFilter) {
-                    $q->orWhere(function($sq) use ($coloniaFilter) {
-                        $sq->where('colonia', 'like', "%{$coloniaFilter}%")
-                           ->orWhere('municipio', 'like', "%{$coloniaFilter}%")
-                           ->orWhere('estado', 'like', "%{$coloniaFilter}%")
-                           ->orWhere('region', 'like', "%{$coloniaFilter}%");
-                    });
+                    $q->orWhere('colonia', 'like', "%{$coloniaFilter}%");
                 }
             });
         }
 
-        // 5. Electoral Filter: Sección
+        // 5. Electoral Filter
         if ($seccionFilter) {
             $query->where('seccion', $seccionFilter);
         }
 
-        // 6. Citizen Code Filter (CDZ)
+        // 6. Citizen Code Filter (Fixed column name)
         if ($cdzFilter) {
-            $query->where('cdz_code', 'like', "%{$cdzFilter}%");
+            $query->where('codigo_ciudadano', 'like', "%{$cdzFilter}%");
         }
 
         // 7. Age Range Filter
-        if ($minAge) {
-            $query->where('edad', '>=', (int)$minAge);
-        }
-        if ($maxAge) {
-            $query->where('edad', '<=', (int)$maxAge);
-        }
+        if ($minAge) $query->where('edad', '>=', (int)$minAge);
+        if ($maxAge) $query->where('edad', '<=', (int)$maxAge);
 
-        // 8. Search by Name / CDZ / CURP
+        // 8. Global Search
         if ($searchFilter) {
             $query->where(function($q) use ($searchFilter) {
                 $q->where('nombre', 'like', "%{$searchFilter}%")
                   ->orWhere('apellido_paterno', 'like', "%{$searchFilter}%")
                   ->orWhere('cedula', 'like', "%{$searchFilter}%")
                   ->orWhere('curp', 'like', "%{$searchFilter}%")
-                  ->orWhere('cdz_code', 'like', "%{$searchFilter}%");
+                  ->orWhere('codigo_ciudadano', 'like', "%{$searchFilter}%");
             });
         }
 
-        // If include_attendees is true, also get personas from past event attendees
+        // 9. Past Attendees Union
         if ($includeAttendees) {
-            $attendeeIds = $campaign->events()
-                ->with('attendees')
-                ->get()
-                ->flatMap(function ($event) {
-                    return $event->attendees->pluck('persona_id');
-                })
-                ->unique()
-                ->toArray();
+            $attendeeIds = $campaign->events()->with('attendees')->get()
+                ->flatMap(fn($e) => $e->attendees->pluck('persona_id'))
+                ->unique()->toArray();
 
             if (!empty($attendeeIds)) {
-                // Union with attendees (if they match universe criteria)
-                $query->orWhere(function($q) use ($attendeeIds) {
-                    $q->whereIn('id', $attendeeIds);
-                });
+                $query->orWhereIn('id', $attendeeIds);
             }
         }
 
-        // Optionally update last_invited_event_id for all these personas
+        // Update invited status if requested
         if ($eventId && $request->boolean('update_invited')) {
-            // Clone the query to perform update without limit/offset
             $updateQuery = clone $query;
-            $updateQuery->update(['last_invited_event_id' => $eventId]);
+            $updateQuery->update([
+                'last_invited_event_id' => $eventId,
+                'last_invited_at' => now()
+            ]);
         }
 
-        // Order by loyalty balance (prioritize engaged personas)
-        $query->orderByDesc('loyalty_balance')
-              ->orderBy('nombre');
-
-        // Get total count before pagination
         $total = $query->count();
 
-        // Apply pagination if limit specified
-        if ($limit) {
-            $query->limit($limit)->offset($offset);
-        }
+        // Apply pagination and select lighter fields
+        if ($limit) $query->limit($limit)->offset($offset);
 
-        // Get the personas with necessary fields
         $personas = $query->select([
-            'id',
-            'cedula',
-            'nombre',
-            'apellido_paterno',
-            'apellido_materno',
-            'numero_celular',
-            'numero_telefono',
-            'universe_type',
-            'is_leader',
-            'referral_code',
-            'loyalty_balance',
-            'municipio',
-            'estado',
-            'region',
-        ])->get();
+            'id', 'cedula', 'nombre', 'apellido_paterno', 'apellido_materno',
+            'numero_celular', 'numero_telefono', 'universe_type', 'is_leader',
+            'referral_code', 'loyalty_balance', 'municipio', 'estado', 'region', 'tags'
+        ])->orderByDesc('loyalty_balance')
+          ->orderBy('nombre')
+          ->get();
 
-        // Add full name for convenience
         $personas = $personas->map(function ($persona) {
             $persona->full_name = trim("{$persona->nombre} {$persona->apellido_paterno} {$persona->apellido_materno}");
             $persona->phone = $persona->numero_celular ?: $persona->numero_telefono;
             return $persona;
         });
 
-        $debug = [
-            'sql' => $query->toSql(),
-            'bindings' => $query->getBindings(),
-            'territorioFilter' => $territorioFilter,
-            'campaign_target_universes' => $campaign->target_universes,
-            'count' => $query->count(),
-        ];
-        // Debug removido en producción — usar Log::debug() si es necesario
-        if (config('app.debug')) {
-            Log::debug('Personas query debug', $debug);
-        }
         return response()->json([
             'success' => true,
             'campaign' => [
                 'id' => $campaign->id,
                 'name' => $campaign->name,
                 'theme' => $campaign->theme,
-                'target_universes' => $campaign->target_universes,
             ],
             'personas' => $personas,
             'meta' => [
@@ -432,115 +353,7 @@ class CampaignController extends Controller
         ]);
     }
 
-    /**
-     * Process all CSV segmentation files for a campaign.
-     * 
-     * This endpoint triggers the import of personas from uploaded CSV files.
-     * Should be called after campaign creation or when files are updated.
-     */
-    public function processSegmentation(string $id): JsonResponse
-    {
-        $campaign = Campaign::findOrFail($id);
-        
-        // Check if any segmentation files exist
-        if (!$campaign->citizen_segmentation_file && 
-            !$campaign->leader_segmentation_file && 
-            !$campaign->militant_segmentation_file) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No segmentation files found for this campaign'
-            ], 400);
-        }
 
-        try {
-            $service = new CsvSegmentationService();
-            $stats = $service->processAllSegmentationFiles($campaign);
-
-            // Log the import
-            Log::info("CSV segmentation processed for campaign {$id}", $stats);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Segmentation files processed successfully',
-                'statistics' => $stats
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error("Error processing segmentation for campaign {$id}: {$e->getMessage()}");
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Error processing segmentation files',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Validate a segmentation file without processing it
-     */
-    public function validateSegmentation(string $id, Request $request): JsonResponse
-    {
-        $campaign = Campaign::findOrFail($id);
-        
-        $fileType = $request->input('file_type'); // 'citizen', 'leader', or 'militant'
-        
-        $fileField = match($fileType) {
-            'citizen' => 'citizen_segmentation_file',
-            'leader' => 'leader_segmentation_file',
-            'militant' => 'militant_segmentation_file',
-            default => null
-        };
-
-        if (!$fileField || !$campaign->{$fileField}) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid file type or file not found'
-            ], 400);
-        }
-
-        $service = new CsvSegmentationService();
-        $validation = $service->validateCsvFile($campaign->{$fileField});
-
-        return response()->json([
-            'success' => $validation['valid'],
-            'validation' => $validation
-        ]);
-    }
-
-    /**
-     * Get preview of segmentation file data
-     */
-    public function previewSegmentation(string $id, Request $request): JsonResponse
-    {
-        $campaign = Campaign::findOrFail($id);
-        
-        $fileType = $request->input('file_type'); // 'citizen', 'leader', or 'militant'
-        $limit = $request->input('limit', 5);
-        
-        $fileField = match($fileType) {
-            'citizen' => 'citizen_segmentation_file',
-            'leader' => 'leader_segmentation_file',
-            'militant' => 'militant_segmentation_file',
-            default => null
-        };
-
-        if (!$fileField || !$campaign->{$fileField}) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid file type or file not found'
-            ], 400);
-        }
-
-        $service = new CsvSegmentationService();
-        $preview = $service->getCsvPreview($campaign->{$fileField}, $limit);
-
-        return response()->json([
-            'success' => true,
-            'file_type' => $fileType,
-            'preview' => $preview
-        ]);
-    }
 
     /**
      * Get militant QR distribution data for n8n workflow

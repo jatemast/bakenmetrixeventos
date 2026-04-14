@@ -6,7 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class QrCode extends Model
 {
+    use \App\Traits\BelongsToTenant;
+
     protected $fillable = [
+        'tenant_id',
         'campaign_id',
         'event_id',
         'type',
