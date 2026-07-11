@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\Sync\SyncDeviceController;
 use App\Http\Controllers\CampaignController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\PersonaController;
@@ -287,3 +288,9 @@ Route::post('/public/register-super-persona', [\App\Http\Controllers\PublicRegis
 Route::post('/public/confirm-reservation', [\App\Http\Controllers\PublicRegistrationController::class, 'confirmReservation']);
 Route::post('/public/whatsapp-session/get', [\App\Http\Controllers\PublicRegistrationController::class, 'getWhatsAppSession']);
 Route::post('/public/whatsapp-session/update', [\App\Http\Controllers\PublicRegistrationController::class, 'updateWhatsAppSession']);
+// Master sync device tokens (Central-authenticated admin)
+Route::middleware('hub.auth')->group(function () {
+    Route::get('/sync-devices', [SyncDeviceController::class, 'index']);
+    Route::post('/sync-devices', [SyncDeviceController::class, 'store']);
+    Route::delete('/sync-devices/{id}', [SyncDeviceController::class, 'destroy']);
+});
