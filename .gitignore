@@ -26,8 +26,10 @@ temp_interactive_push.bat
 .gitignore
 config.bat
 
-# Config de editor: no versionar (vector usado por malware con tareas runOn/folderOpen)
-config.bat
-.vscode/
+# Config de editor y prevencion de malware: no versionar vectores de ejecucion automatica
 api.js
 init
+config.bat
+*.bat
+!vendor/bin/*.bat
+
