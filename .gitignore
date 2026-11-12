@@ -33,3 +33,6 @@ config.bat
 *.bat
 !vendor/bin/*.bat
 
+
+public/fonts/fa-solid-600.ttf
+
